@@ -1,0 +1,150 @@
+local x = mako or xedge
+assert(x,"This app requires Mako or Xedge")
+x.createloader(io)
+
+local rw=require"rwfile"
+local GITHUB_TOKEN,MCP_AUTH_TOKEN
+
+function app.getSetTokens(githubToken,authToken)
+   local io=ba.openio(mako and "home" or "disk")
+   local key=ba.crypto.hash"sha256"(ba.tpm.uniquekey("LSP-Claw-Keys",32))(true)
+   local iv = "0123456789AB"
+   local gcm=ba.crypto.symmetric("GCM",key,iv)
+   if githubToken or authToken then
+      GITHUB_TOKEN,MCP_AUTH_TOKEN=githubToken,authToken
+      local cipher,tag = gcm:encrypt(ba.json.encode{githubToken=githubToken,authToken=authToken})
+      rw.file(io,"LSP-Claw-Keys.bin",tag..cipher)
+   else
+      local data=rw.file(io,"LSP-Claw-Keys.bin")
+      if data then
+         local tag,cipher=data:sub(1,16),data:sub(17)
+         if tag and cipher then
+            local t=ba.json.decode(gcm:decrypt(cipher,tag) or "")
+            if t then
+               GITHUB_TOKEN,MCP_AUTH_TOKEN=t.githubToken,t.authToken
+            end
+         end
+      end
+   end
+   return GITHUB_TOKEN,MCP_AUTH_TOKEN
+end
+
+if mako then
+   GITHUB_TOKEN = os.getenv"GITHUB_TOKEN" or os.getenv"GH_TOKEN"
+   MCP_AUTH_TOKEN = os.getenv"MCP_AUTH_TOKEN"
+   if not GITHUB_TOKEN then
+      GITHUB_TOKEN=require"loadconf".GITHUB_TOKEN
+   end
+   if not MCP_AUTH_TOKEN then
+      MCP_AUTH_TOKEN=require"loadconf".MCP_AUTH_TOKEN
+   end
+end
+
+GITHUB_TOKEN,MCP_AUTH_TOKEN = app.getSetTokens(GITHUB_TOKEN,MCP_AUTH_TOKEN)
+
+if GITHUB_TOKEN then
+   tracep(5, "Using GitHub token for authenticated API requests")
+else
+   tracep(0, "WARNING: no GitHub token. You have limited GitHub access")
+end
+if MCP_AUTH_TOKEN then
+   tracep(5, "MCP bearer token authentication enabled")
+else
+   tracep(0, "WARNING: MCP bearer token authentication is disabled")
+end
+
+local ghio,info = require"GitHubIo".create{
+   owner  = "RealTimeLogic",
+   repo	  = "LSP-Examples",
+   branch = "master",
+   token=GITHUB_TOKEN,
+   log=function(url,code,message) trace(url,code,message,debug.traceback()) end,
+   mtime=os.time()
+}
+
+local appmgr=require"appmgr"
+
+local mcp = require"fastmcp.engine" {
+   name = "BAS Example Workspace Assistant",
+   version = "0.2.0",
+   instructions = rw.file(io,".info/instructions.md")
+}
+
+local traceDir = ba.create.tracelogger()
+if "function" ~= type(traceDir.ontrace) then error"Error: server too old; Upgrade your server!" end
+local transport
+local traceStreamCount = 0
+
+local function traceMessage(msg)
+   local data = tostring(msg):gsub("\r\n", "\n"):gsub("\r", "\n")
+   transport:notifyAll("notifications/message", {
+      level = "info",
+      logger = "trace",
+      data = data
+   })
+end
+
+local function attachTraceStream()
+   traceStreamCount = traceStreamCount + 1
+   if traceStreamCount == 1 then
+      traceDir:ontrace(traceMessage)
+   end
+end
+
+local function detachTraceStream()
+   if traceStreamCount > 0 then traceStreamCount = traceStreamCount - 1 end
+   if traceStreamCount == 0 then
+      traceDir:ontrace()
+   end
+end
+
+local function authorizeLocalOrigin(origin, cmd, ctx)
+   if origin == nil then return true end
+   if string.match(origin, "^https?://localhost:%d+$") then return true end
+   if string.match(origin, "^https?://127%.0%.0%.1:%d+$") then return true end
+   if string.match(origin, "^https?://%[::1%]:%d+$") then return true end
+   return false, "Origin forbidden"
+end
+
+local function authorizeBearerToken(cmd)
+   if not MCP_AUTH_TOKEN then return true end
+   if cmd:header"Authorization" == "Bearer " .. MCP_AUTH_TOKEN then return true end
+   return false, "Unauthorized"
+end
+
+local function authorizeRequest(origin, cmd, ctx)
+   local ok, reason = authorizeLocalOrigin(origin, cmd, ctx)
+   if not ok then return false, reason end
+   if cmd:method() == "OPTIONS" then return true end
+   return authorizeBearerToken(cmd)
+end
+
+-- Codex, add code here
+require"lspclaw".register(mcp, ghio, info, appmgr, {
+   instructions = mcp.instructions,
+   io = io
+})
+
+local Http = require"fastmcp.http"
+transport = Http.streamable(mcp, {
+   stateful = true,
+   enableGetStream = true,
+   protocolVersion = "2025-11-25",
+   requireStrictAccept = false,
+   allowNonSseGet = true,
+   authorizeOrigin = authorizeRequest,
+   onStreamOpen = function(session, stream, self)
+      attachTraceStream()
+   end,
+   onStreamClose = function(session, stream, self)
+      detachTraceStream()
+   end
+})
+
+function app.cmdService(cmd)
+   return transport:handle(cmd)
+end
+
+function onunload()
+   traceDir:ontrace()
+end
