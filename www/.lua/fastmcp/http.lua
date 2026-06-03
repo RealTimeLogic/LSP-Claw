@@ -246,7 +246,13 @@ function Streamable:writeFrameToStream(session, streamId, message)
    if not ok or not encoded then return false end
    encoded = string.gsub(encoded, "\\/", "/")
    local frame = "event: message\n" .. "data: " .. encoded .. "\n\n"
-   stream.queue[#stream.queue + 1] = string.format("%X\r\n%s\r\n", #frame, frame)
+   local chunk = string.format("%X\r\n%s\r\n", #frame, frame)
+   local err
+   ok, err = stream.socket:write(chunk)
+   if not ok then
+      self:removeStream(session.id, streamId)
+      return false
+   end
    return true
 end
 
@@ -258,7 +264,7 @@ function Streamable:removeStream(sessionId, streamId)
    if stream and type(self.onStreamClose) == "function" then
       pcall(self.onStreamClose, session, stream, self)
    end
-   if stream and stream.socket then pcall(function() stream.socket:close() end) end
+   if stream and stream.socket then stream.socket:close() end
 end
 
 function Streamable:addStream(session, socket)
@@ -267,8 +273,6 @@ function Streamable:addStream(session, socket)
    session.streams[streamId] = {
       id = streamId,
       socket = socket,
-      queue = {},
-      lastHeartbeat = os.time(),
       createdAt = os.time()
    }
    if type(self.onStreamOpen) == "function" then
@@ -383,29 +387,13 @@ function Streamable:handleGet(cmd)
    cmd:flush()
 
    local socket = ba.socket.req2sock(cmd)
+   if not socket then return end
    local streamId = self:addStream(session, socket)
-   while session.streams[streamId] do
-      local stream = session.streams[streamId]
-      local frame = stream and table.remove(stream.queue, 1)
-      if frame then
-	 local ok, result, err = pcall(function() return socket:write(frame) end)
-	 if not ok or (result == nil and err ~= nil) then
-	    self:removeStream(session.id, streamId)
-	 end
-      else
-	 if stream and os.difftime(os.time(), stream.lastHeartbeat or 0) >= self.heartbeatSeconds then
-	    local heartbeat = ": ping\n\n"
-	    local chunk = string.format("%X\r\n%s\r\n", #heartbeat, heartbeat)
-	    local ok, result, err = pcall(function() return socket:write(chunk) end)
-	    if not ok or (result == nil and err ~= nil) then
-	       self:removeStream(session.id, streamId)
-	    else
-	       stream.lastHeartbeat = os.time()
-	    end
-	 end
-	 ba.sleep(100)
-      end
-   end
+   socket:event(function(sock)
+      sock:read()
+      self:removeStream(session.id, streamId)
+   end, "s")
+   if type(cmd.abort) == "function" then cmd:abort() end
 end
 
 function Streamable:handlePost(cmd)
@@ -503,7 +491,6 @@ function Http.streamable(mcp, options)
       eventStore = options.eventStore,
       onStreamOpen = options.onStreamOpen,
       onStreamClose = options.onStreamClose,
-      heartbeatSeconds = options.heartbeatSeconds or 15,
       allowNonSseGet = options.allowNonSseGet == true
    }, Streamable)
    return self
@@ -556,4 +543,3 @@ function Http.handle(mcp,cmd)
 end
 
 return Http
-
