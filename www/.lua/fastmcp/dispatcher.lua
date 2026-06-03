@@ -2,9 +2,64 @@ local FastMCP = require "fastmcp.engine"
 local pcall=FastMCP.pcall
 local Dispatcher = {}
 
+local function isInteger(value)
+   return type(value) == "number" and value >= 1 and value % 1 == 0
+end
+
+local function arrayInfo(value)
+   local max = 0
+   for k in pairs(value) do
+      if k ~= "fastmcpType" then
+	 if not isInteger(k) then return false, 0 end
+	 if k > max then max = k end
+      end
+   end
+   if FastMCP.isArray(value) then return true, max end
+   if max == 0 then return false, 0 end
+   for i = 1, max do
+      if rawget(value, i) == nil then return false, 0 end
+   end
+   return true, max
+end
+
+local function jsonEncodeValue(value, seen)
+   local valueType = type(value)
+   if value == nil or value == ba.json.null then return "null" end
+   if valueType == "string" then return ba.json.encodestr(value) end
+   if valueType == "number" then return tostring(value) end
+   if valueType == "boolean" then return value and "true" or "false" end
+   if valueType ~= "table" then return "null" end
+
+   seen = seen or {}
+   if seen[value] then return "null" end
+   seen[value] = true
+
+   local isArray, max = arrayInfo(value)
+   local out = {}
+   if isArray then
+      for i = 1, max do out[#out + 1] = jsonEncodeValue(rawget(value, i), seen) end
+      seen[value] = nil
+      return "[" .. table.concat(out, ",") .. "]"
+   end
+
+   local keys = {}
+   for k, v in pairs(value) do
+      if k ~= "fastmcpType" and v ~= nil then keys[#keys + 1] = k end
+   end
+   table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+   for _, key in ipairs(keys) do
+      local keyType = type(key)
+      if keyType == "string" or keyType == "number" then
+	 out[#out + 1] = ba.json.encodestr(tostring(key)) .. ":" .. jsonEncodeValue(value[key], seen)
+      end
+   end
+   seen[value] = nil
+   return "{" .. table.concat(out, ",") .. "}"
+end
+
 local function jsonEncode(value)
-   local ok, encoded = pcall(ba.json.encode, value)
-   if ok and encoded then return encoded end
+   local ok, encoded = pcall(jsonEncodeValue, value)
+   if ok then return encoded end
    return tostring(value)
 end
 
@@ -53,9 +108,9 @@ local function contentItem(item)
 end
 
 local function contentArray(content)
-   local out = {}
+   local out = FastMCP.array()
    if type(content) ~= "table" then
-      return { { type = "text", text = tostring(content) } }
+      return FastMCP.array{ { type = "text", text = tostring(content) } }
    end
    for _, item in ipairs(content) do
       out[#out + 1] = contentItem(item)
@@ -67,7 +122,7 @@ function Dispatcher.toMcpToolResult(value)
    if FastMCP.isProtocolError(value) then return value end
    if FastMCP.isError(value) then
       local result = {
-	 content = {
+	 content = FastMCP.array{
 	    { type = "text", text = value.message }
 	 },
 	 isError = true
@@ -87,7 +142,7 @@ function Dispatcher.toMcpToolResult(value)
    end
    if type(value) == "string" then
       return {
-	 content = {
+	 content = FastMCP.array{
 	    { type = "text", text = value }
 	 },
 	 isError = false
@@ -95,7 +150,7 @@ function Dispatcher.toMcpToolResult(value)
    end
    if type(value) == "table" then
       return {
-	 content = {
+	 content = FastMCP.array{
 	    { type = "text", text = jsonEncode(value) }
 	 },
 	 structuredContent = value,
@@ -103,10 +158,10 @@ function Dispatcher.toMcpToolResult(value)
       }
    end
    if value == nil then
-      return { content = {}, isError = false }
+      return { content = FastMCP.array(), isError = false }
    end
    return {
-      content = {
+      content = FastMCP.array{
 	 { type = "text", text = tostring(value) }
       },
       isError = false
@@ -143,7 +198,7 @@ function Dispatcher.toMcpResourceResult(value, uri, defaultMimeType)
       return FastMCP.protocolError(-32603, value.message, value.details)
    end
    if FastMCP.isResourceResult(value) then
-      local result = { contents = {}, _meta = value.meta }
+      local result = { contents = FastMCP.array(), _meta = value.meta }
       for _, item in ipairs(value.contents or {}) do
 	 result.contents[#result.contents + 1] = contentToResourceEntry(item, uri, defaultMimeType)
       end
@@ -151,14 +206,14 @@ function Dispatcher.toMcpResourceResult(value, uri, defaultMimeType)
    end
    if FastMCP.isResourceContent(value) then
       return {
-	 contents = {
+	 contents = FastMCP.array{
 	    contentToResourceEntry(value, uri, value.mimeType or defaultMimeType)
 	 }
       }
    end
    if type(value) == "table" then
       return {
-	 contents = {
+	 contents = FastMCP.array{
 	    {
 	       uri = uri,
 	       mimeType = defaultMimeType or "application/json",
@@ -168,7 +223,7 @@ function Dispatcher.toMcpResourceResult(value, uri, defaultMimeType)
       }
    end
    return {
-      contents = {
+      contents = FastMCP.array{
 	 {
 	    uri = uri,
 	    mimeType = defaultMimeType or "text/plain",
@@ -217,7 +272,7 @@ function Dispatcher.toMcpPromptResult(value, prompt)
       }
    end
 
-   local messages = {}
+   local messages = FastMCP.array()
    if type(value) == "table" then
       for _, msg in ipairs(value) do
 	 if type(msg) == "string" then
@@ -274,7 +329,7 @@ local function dispatchRequestProt(mcp, msg, ctx)
    elseif method == "completion/complete" then
       return {
 	 completion = {
-	    values = {},
+	    values = FastMCP.array(),
 	    total = 0,
 	    hasMore = false
 	 }
@@ -334,5 +389,6 @@ end
 
 Dispatcher.jsonRpcError = jsonRpcError
 Dispatcher.jsonRpcResult = jsonRpcResult
+Dispatcher.jsonEncode = jsonEncode
 
 return Dispatcher

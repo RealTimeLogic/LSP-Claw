@@ -38,7 +38,7 @@ local function sendJson(cmd,obj,status)
    setOrigin(cmd)
    cmd:setheader("Content-Type","application/json")
    cmd:setheader("MCP-Protocol-Version","2025-11-25")
-   cmd:json(obj,false,true)
+   cmd:write(Dispatcher.jsonEncode(obj))
 end
 
 local function sendStreamableJson(self, cmd, obj, status, origin, sessionId)
@@ -46,7 +46,7 @@ local function sendStreamableJson(self, cmd, obj, status, origin, sessionId)
    cmd:setstatus(status or 200)
    setStreamableBaseHeaders(self, cmd, origin, sessionId)
    cmd:setheader("Content-Type", "application/json")
-   cmd:json(obj, false, true)
+   cmd:write(Dispatcher.jsonEncode(obj))
 end
 
 local function sendEmpty(cmd,status)
@@ -242,13 +242,11 @@ end
 function Streamable:writeFrameToStream(session, streamId, message)
    local stream = session and session.streams and session.streams[streamId]
    if not stream or not stream.socket then return false end
-   local ok, encoded = pcall(ba.json.encode, message)
-   if not ok or not encoded then return false end
+   local encoded = Dispatcher.jsonEncode(message)
    encoded = string.gsub(encoded, "\\/", "/")
    local frame = "event: message\n" .. "data: " .. encoded .. "\n\n"
    local chunk = string.format("%X\r\n%s\r\n", #frame, frame)
-   local err
-   ok, err = stream.socket:write(chunk)
+   local ok, err = stream.socket:write(chunk)
    if not ok then
       self:removeStream(session.id, streamId)
       return false

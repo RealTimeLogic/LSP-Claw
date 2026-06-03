@@ -88,6 +88,10 @@ function FastMCP.promptResult(result)
    return mark("promptResult", result)
 end
 
+function FastMCP.array(value)
+   return mark("array", value or {})
+end
+
 function FastMCP.isError(value)
    return type(value) == "table" and value.fastmcpType == "error"
 end
@@ -110,6 +114,10 @@ end
 
 function FastMCP.isPromptResult(value)
    return type(value) == "table" and value.fastmcpType == "promptResult"
+end
+
+function FastMCP.isArray(value)
+   return type(value) == "table" and value.fastmcpType == "array"
 end
 
 local function publicMeta(component)
@@ -334,7 +342,7 @@ function FastMCP:isAuthorized(component, ctx)
 end
 
 function FastMCP:listTools(ctx)
-   local out = {}
+   local out = FastMCP.array()
    for _, name in ipairs(self.toolOrder) do
       local tool = self.tools[name]
       if tool and self:isAuthorized(tool, ctx) then
@@ -373,7 +381,7 @@ function FastMCP:callTool(name, arguments, ctx)
 end
 
 function FastMCP:listResources(ctx)
-   local out = {}
+   local out = FastMCP.array()
    for _, uri in ipairs(self.resourceOrder) do
       local res = self.resources[uri]
       if res and self:isAuthorized(res, ctx) then
@@ -438,7 +446,7 @@ function FastMCP:readResource(uri, ctx)
 end
 
 function FastMCP:listResourceTemplates(ctx)
-   local out = {}
+   local out = FastMCP.array()
    for _, uriTemplate in ipairs(self.resourceTemplateOrder) do
       local tmpl = self.resourceTemplates[uriTemplate]
       if tmpl and self:isAuthorized(tmpl, ctx) then
@@ -463,7 +471,7 @@ function FastMCP:listResourceTemplates(ctx)
 end
 
 local function promptArguments(definitions)
-   local out = {}
+   local out = FastMCP.array()
    for _, name in ipairs(sortedKeys(definitions)) do
       local def = definitions[name]
       if type(def) == "table" then
@@ -480,7 +488,7 @@ local function promptArguments(definitions)
 end
 
 function FastMCP:listPrompts(ctx)
-   local out = {}
+   local out = FastMCP.array()
    for _, name in ipairs(self.promptOrder) do
       local prompt = self.prompts[name]
       if prompt and self:isAuthorized(prompt, ctx) then
