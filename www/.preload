@@ -74,28 +74,41 @@ local traceDir = ba.create.tracelogger()
 if "function" ~= type(traceDir.ontrace) then error"Error: server too old; Upgrade your server!" end
 local transport
 local traceStreamCount = 0
+local traceHookActive = false
+local runtimeTraceBufferSize = 10 * 1024
+local runtimeTrace = {}
 
 local function traceMessage(msg)
    local data = tostring(msg):gsub("\r\n", "\n"):gsub("\r", "\n")
-   transport:notifyAll("notifications/message", {
-      level = "info",
-      logger = "trace",
-      data = data
-   })
+   if transport then
+      transport:notifyAll("notifications/message", {
+	 level = "info",
+	 logger = "trace",
+	 data = data
+      })
+   end
+   if runtimeTrace.record then runtimeTrace.record(data) end
+end
+
+local function updateTraceHook()
+   local shouldTrace = traceStreamCount > 0 or runtimeTraceBufferSize > 0
+   if shouldTrace and not traceHookActive then
+      traceDir:ontrace(traceMessage)
+      traceHookActive = true
+   elseif not shouldTrace and traceHookActive then
+      traceDir:ontrace()
+      traceHookActive = false
+   end
 end
 
 local function attachTraceStream()
    traceStreamCount = traceStreamCount + 1
-   if traceStreamCount == 1 then
-      traceDir:ontrace(traceMessage)
-   end
+   updateTraceHook()
 end
 
 local function detachTraceStream()
    if traceStreamCount > 0 then traceStreamCount = traceStreamCount - 1 end
-   if traceStreamCount == 0 then
-      traceDir:ontrace()
-   end
+   updateTraceHook()
 end
 
 local function authorizeLocalOrigin(origin, cmd, ctx)
@@ -122,8 +135,21 @@ end
 -- Codex, add code here
 require"lspclaw".register(mcp, ghio, info, appmgr, {
    instructions = mcp.instructions,
-   io = io
+   io = io,
+   runtimeTrace = runtimeTrace,
+   runtimeTraceBufferSize = runtimeTraceBufferSize
 })
+
+function app.setRuntimeTraceBufferSize(size)
+   if runtimeTrace.setBufferSize then
+      runtimeTraceBufferSize = runtimeTrace.setBufferSize(size)
+   else
+      runtimeTraceBufferSize = math.floor(tonumber(size) or 0)
+      if runtimeTraceBufferSize < 0 then runtimeTraceBufferSize = 0 end
+   end
+   updateTraceHook()
+   return runtimeTraceBufferSize
+end
 
 local Http = require"fastmcp.http"
 transport = Http.streamable(mcp, {
@@ -140,6 +166,7 @@ transport = Http.streamable(mcp, {
       detachTraceStream()
    end
 })
+updateTraceHook()
 
 function app.cmdService(cmd)
    return transport:handle(cmd)

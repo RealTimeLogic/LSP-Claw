@@ -35,6 +35,7 @@ The server provides two distinct environments:
      - writeLabFile
      - startLab
      - stopLab
+     - readRuntimeTrace
 
 When using the Streamable HTTP transport, open the MCP GET SSE stream after
 initialize and keep it open while writing and running lab programs. The server
@@ -43,6 +44,28 @@ logger = "trace". Use these messages as runtime feedback for LSP pages:
 trace(...) output, Lua exceptions, stack traces, and server diagnostics can
 appear there while the lab app runs. This applies in all supported host modes:
 Mako Server, Mako Server powering Xedge, and standalone Xedge.
+
+For full LSP-Claw support, the MCP client must expose asynchronous server
+notifications to the AI agent/model. Tool responses such as startLab and
+writeLabFile only confirm that the requested operation was accepted; they do
+not prove that Lua runtime code behaved correctly. If your client does not
+expose notifications/message events to the agent/model, say so explicitly and
+do not claim to have observed runtime trace output.
+
+If async notifications are not visible to the agent/model, call
+readRuntimeTrace immediately after startLab, writeLabFile with xlua activation,
+or any request that should execute Lua code. readRuntimeTrace returns buffered
+trace text and always clears the buffer. Check the returned overflowed,
+truncated, and droppedBytes fields before relying on the beginning of the trace
+text. This is a compatibility fallback; live notifications/message events
+remain the preferred real-time signal.
+
+Tool responses such as getLabStatus and startLab may include labApp paths. These
+paths are relative to the BAS/MCP server origin. Derive the full browser URL by
+combining the MCP server scheme, host, and port with the returned path. For
+example, if the MCP server is http://localhost/lsp-claw/mcp.lsp, lab path /
+means http://localhost/. If the MCP server is remote, use that remote host
+instead of localhost.
 
 Recommended workflow when the user asks which GitHub example to use:
 
@@ -53,6 +76,8 @@ Recommended workflow when the user asks which GitHub example to use:
 5. Open the Streamable HTTP GET SSE stream before running the lab.
 6. Use lab tools for all further edits.
 7. Use startLab to run the lab and monitor trace notifications for errors.
+8. If trace notifications are not visible to the agent/model, call
+   readRuntimeTrace immediately after startLab.
 
 Example selection guidance:
 
@@ -81,10 +106,15 @@ Recommended workflow when the user asks to design or build an app:
    other BAS app files.
 5. Open the Streamable HTTP GET SSE stream before running or testing the lab.
 6. Use startLab to run the lab.
-7. Request the relevant .lsp page or app URL through the BAS host.
+7. Request the relevant .lsp page or app URL through the BAS host. Prefer the
+   labApp paths returned by getLabStatus or startLab, and combine them with the
+   MCP server origin.
 8. Monitor trace notifications for trace output, Lua exceptions, and stack
    traces. Use that feedback to fix files with writeLabFile.
-9. Use stopLab when finished or before changing startup-sensitive files.
+9. If trace notifications are not visible to the agent/model, call
+   readRuntimeTrace immediately after runtime actions and inspect the returned
+   trace text.
+10. Use stopLab when finished or before changing startup-sensitive files.
 
 Runtime debugging pattern:
 
@@ -93,6 +123,8 @@ Runtime debugging pattern:
 - Keep the Streamable HTTP GET SSE stream open and inspect trace
   notifications to understand control flow, values, request parameters, and
   failing branches.
+- For notification-blind clients, use readRuntimeTrace after each runtime action
+  that should produce trace output. The tool drains the current trace buffer.
 - Remove temporary trace instrumentation after the issue is understood or fixed.
 - Do not trace secrets, tokens, authorization headers, cookies, or large payloads.
 
@@ -112,6 +144,9 @@ Development rules:
 - For Mako-only testing, prefer .lsp files and HTTP requests to those pages.
 - Use .xlua activation only when getRuntimeInfo reports Xedge support and the
   lab is running.
+- For state shared between .preload and .lsp pages, store values on the app
+  table. For example, in .preload use app.temperature = { value = 21.0 }, and
+  in index.lsp read local temperature = app.temperature.
 - Prefer small, incremental, working changes.
 - Preserve existing example structure unless there is a strong reason to refactor.
 - Explain all created or modified files.
@@ -136,6 +171,7 @@ BAS API guidance:
   options, security guidance, and examples.
 - Use the [ESP32 API](https://realtimelogic.com/downloads/esp32api.md) for
   Xedge32 and ESP32-specific hardware APIs such as GPIO, I2C, ADC, and UART.
+- Use the [OPC UA API](https://realtimelogic.com/downloads/opcuaapi.md) when designing OPC UA apps.
 - If API syntax or behavior is unclear, search the documentation bundles before
   writing code. Do not invent BAS APIs.
 - Prefer BAS-native APIs and examples over third-party Lua modules or generic

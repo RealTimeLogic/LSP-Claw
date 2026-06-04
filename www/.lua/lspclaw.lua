@@ -49,6 +49,103 @@ local function result(message, runtime, data, warnings, nextActions)
    }
 end
 
+local function traceBufferSize(value)
+   local size = tonumber(value) or 0
+   if size < 0 then size = 0 end
+   return math.floor(size)
+end
+
+local function setupRuntimeTrace(runtimeTrace, defaultBufferSize)
+   runtimeTrace = runtimeTrace or {}
+   local segments = {}
+   local head, tail = 1, 0
+   local bytes = 0
+   local limit = traceBufferSize(defaultBufferSize)
+   local overflowed = false
+   local droppedBytes = 0
+
+   local function clear()
+      segments = {}
+      head, tail = 1, 0
+      bytes = 0
+      overflowed = false
+      droppedBytes = 0
+   end
+
+   local function messageCount()
+      return tail >= head and (tail - head + 1) or 0
+   end
+
+   local function trim()
+      if limit <= 0 then
+	 clear()
+	 return
+      end
+      while bytes > limit and head <= tail do
+	 local oldest = segments[head] or ""
+	 local oldestSize = #oldest
+	 local bytesWithoutOldest = bytes - oldestSize
+	 if bytesWithoutOldest >= limit or oldestSize == 0 then
+	    segments[head] = nil
+	    head = head + 1
+	    bytes = bytesWithoutOldest
+	    overflowed = true
+	    droppedBytes = droppedBytes + oldestSize
+	 else
+	    local keep = limit - bytesWithoutOldest
+	    local trimmed = oldest:sub(oldestSize - keep + 1)
+	    segments[head] = trimmed
+	    bytes = bytesWithoutOldest + #trimmed
+	    overflowed = true
+	    droppedBytes = droppedBytes + oldestSize - #trimmed
+	    break
+	 end
+      end
+   end
+
+   function runtimeTrace.record(data)
+      if limit <= 0 then return false end
+      data = tostring(data or "")
+      if data == "" then return true end
+      if #data > limit then
+	 overflowed = true
+	 droppedBytes = droppedBytes + #data - limit
+	 data = data:sub(#data - limit + 1)
+      end
+      tail = tail + 1
+      segments[tail] = data
+      bytes = bytes + #data
+      trim()
+      return true
+   end
+
+   function runtimeTrace.read()
+      local trace = messageCount() > 0 and table.concat(segments, "", head, tail) or ""
+      local data = {
+	 trace = trace,
+	 bytes = bytes,
+	 messageCount = messageCount(),
+	 bufferSize = limit,
+	 overflowed = overflowed,
+	 truncated = overflowed,
+	 droppedBytes = droppedBytes,
+	 enabled = limit > 0,
+	 cleared = true
+      }
+      clear()
+      return data
+   end
+
+   function runtimeTrace.setBufferSize(size)
+      limit = traceBufferSize(size)
+      if limit <= 0 then clear() else trim() end
+      return limit
+   end
+
+   runtimeTrace.setBufferSize(limit)
+   return runtimeTrace
+end
+
 local function lower(value)
    return string.lower(tostring(value or ""))
 end
@@ -685,6 +782,29 @@ local function inspectExampleData(ghio, info, appmgr, examplePath, includeReadme
    return analysis, runtime, runtimeWarnings(runtime, analysis)
 end
 
+local function labAppPaths(files)
+   local has = {}
+   for _, file in ipairs(files or {}) do has[file] = true end
+   local entryPaths = { "/" }
+   if has["index.lsp"] then tinsert(entryPaths, "/index.lsp") end
+   if has["index.html"] then tinsert(entryPaths, "/index.html") end
+   return {
+      mountPath = "/",
+      appPath = "/",
+      entryPaths = entryPaths,
+      commonEntryPaths = { "/", "/index.lsp", "/index.html" },
+      urlGuidance = "Paths are relative to the BAS/MCP server origin. Derive the full URL by combining the MCP server scheme, host, and port with the path. For example, / means http://localhost/ when localhost is the MCP server address."
+   }
+end
+
+local function labOpenNextActions(labApp)
+   return {
+      "Open http://localhost/ to view the lab app, where localhost is the MCP server address. If the MCP server is remote, replace localhost with that host name or IP address.",
+      "The returned labApp paths are relative to the MCP server origin; combine the MCP scheme/host/port with the relative path.",
+      "After requesting a page, inspect trace notifications or call readRuntimeTrace to check for LSP/Lua errors."
+   }
+end
+
 local function labStatusData(appmgr)
    local labIo, executeIoOrErr = ensureLab(appmgr)
    if not labIo then return nil, executeIoOrErr end
@@ -716,7 +836,8 @@ local function labStatusData(appmgr)
       directoryCount = #dirs,
       topLevelEntries = top,
       files = files,
-      directories = dirs
+      directories = dirs,
+      labApp = labAppPaths(files)
    }, runtime
 end
 
@@ -811,7 +932,7 @@ local function targetRuntimeNotes(targetRuntime, analysis, currentRuntime)
    return notes
 end
 
-local function registerTools(mcp, ghio, info, appmgr)
+local function registerTools(mcp, ghio, info, appmgr, runtimeTrace)
    mcp:tool("getRuntimeInfo", {
       description = "Return Mako/Xedge runtime details for the LSP-Claw lab.",
       inputSchema = objectSchema(),
@@ -822,6 +943,26 @@ local function registerTools(mcp, ghio, info, appmgr)
       return result("Runtime information returned.", runtime, nil, runtime.warnings)
    end)
 
+   mcp:tool("readRuntimeTrace", {
+      description = "Return buffered BAS trace output and clear the runtime trace buffer.",
+      inputSchema = objectSchema(),
+      annotations = readAnnotations
+   }, function()
+      if not runtimeTrace or type(runtimeTrace.read) ~= "function" then
+	 return result("Runtime trace buffering is not configured.", nil, {
+	    trace = "",
+	    bytes = 0,
+	    messageCount = 0,
+	    bufferSize = 0,
+	    enabled = false,
+	    cleared = true
+	 })
+      end
+      local data = runtimeTrace.read()
+      return result(data.trace ~= "" and "Runtime trace returned and cleared." or
+	 "Runtime trace buffer was empty and cleared.", nil, data)
+   end)
+
    mcp:tool("getLabStatus", {
       description = "Return lab runtime, running state, file counts, top-level entries, and file lists.",
       inputSchema = objectSchema(),
@@ -829,7 +970,11 @@ local function registerTools(mcp, ghio, info, appmgr)
    }, function()
       local status, runtimeOrErr = labStatusData(appmgr)
       if not status then return runtimeOrErr end
-      return result("Lab status returned.", runtimeOrErr, status, runtimeOrErr.warnings)
+      local nextActions = status.running and labOpenNextActions(status.labApp) or {
+	 "Use startLab to run the lab app.",
+	 "When the lab is running, combine the returned labApp relative paths with the MCP server origin to open the app."
+      }
+      return result("Lab status returned.", runtimeOrErr, status, runtimeOrErr.warnings, nextActions)
    end)
 
    mcp:tool("createLab", {
@@ -856,17 +1001,18 @@ local function registerTools(mcp, ghio, info, appmgr)
       for _, file in ipairs(files) do if endsWith(lower(file), ".xlua") then hasXlua = true end end
       local warnings = runtimeWarnings(runtime, { hasXlua = hasXlua })
       if appmgr.running() then
-	 return result("Lab is already running.", runtime, { started = false, alreadyRunning = true }, warnings)
+	 local data = { started = false, alreadyRunning = true, labApp = labAppPaths(files) }
+	 return result("Lab is already running.", runtime, data, warnings, labOpenNextActions(data.labApp))
       end
       local ok, err = appmgr.start()
       runtime = runtimeInfo(appmgr)
       if not ok then
 	 return FastMCP.error("Cannot start lab", { code = "startLabFailed", error = err })
       end
-      return result("Lab started.", runtime, { started = true }, warnings, {
-	 "Open the lab app in the BAS host.",
-	 "Use stopLab when finished."
-      })
+      local data = { started = true, labApp = labAppPaths(files) }
+      local nextActions = labOpenNextActions(data.labApp)
+      tinsert(nextActions, "Use stopLab when finished.")
+      return result("Lab started.", runtime, data, warnings, nextActions)
    end)
 
    mcp:tool("stopLab", {
@@ -1644,7 +1790,8 @@ end
 
 function M.register(mcp, ghio, info, appmgr, options)
    options = options or {}
-   registerTools(mcp, ghio, info, appmgr)
+   local runtimeTrace = setupRuntimeTrace(options.runtimeTrace, options.runtimeTraceBufferSize)
+   registerTools(mcp, ghio, info, appmgr, runtimeTrace)
    registerResources(mcp, ghio, info, appmgr, options.instructions)
    registerPrompts(mcp, options.io)
    return mcp
