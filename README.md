@@ -269,13 +269,21 @@ work, and how careful it should be with existing lab files.
 - How it should test the result.
 - Whether it may overwrite existing lab files.
 
-Starter prompt:
+### Starter prompt (prime the AI-Agent):
 
 ```text
-Use LSP-Claw. First check whether the lab is running on Mako or Xedge and see
-what files are already in the lab. Build in the lab app, not in my local
-workspace. If the lab already contains files, stop and tell me what is there
-before changing anything. Start the lab and test the page when you are done.
+Use LSP-Claw. First, check whether the lab is running on Mako or
+Xedge, and see what files are already in the lab. Build in the lab
+app, not in my local workspace, and do not use my local workspace
+unless I specifically tell you to.
+```
+
+The following prompt, which requires Xedge, makes sure we can write a simple example and that the AI-Agent can view the printed results.
+
+```text
+Create a simple .xlua file that sets up a timer to print a message
+every second for 5 seconds, then executes it. Inspect the printed
+output and tell me what it is.
 ```
 
 ## Start from an Example
@@ -316,32 +324,28 @@ handles the running lab app.
 After the AI-Agent recommends an example, you can continue with:
 
 ```text
-Before copying, check whether the lab contains files. If it does, stop and tell
-me the conflict options. Do not delete or overwrite anything unless I explicitly
-confirm. If there is no conflict, copy the recommended example into the lab,
-start it, test the main page, and summarize what files were added.
+Back up the existing lab and clean the lab
 ```
+
+You can also ask it to clean all files or copy new files without deleting the current lab.
 
 ## Build a Small LSP Page
 
 Use this when you already know what you want and do not need an example.
 
 ```text
-Use LSP-Claw to build a new Mako-compatible lab app from scratch. Create a
+Use LSP-Claw to build a new LSP app from scratch. Create a
 single index.lsp page that shows a hit counter. Keep it small and compatible
 with BAS/Lua. Start the lab, open the page, and fix any server-side errors.
-```
-
-Useful LSP basics:
-
-```text
-Use <?lsp ?> for Lua code.
-Use <?lsp= ?> for expression output.
-Keep the first version small and dependency-free.
+Tell me how to navigate to it.
 ```
 
 For simple tutorial-sized apps, this direct approach is often better than
 starting from a larger example.
+
+For the above, the URL for this application will be: `http://localhost/`
+
+If you are running Xedge standalone or via the Mako Server, navigate to `http://localhost/rtl/` to open Xedge. Expand the `$lsplab` app and click index.lsp to view the code. Note that the Xedge UI running in the browser is unaware of server-side changes, and you must refresh it to see the new changes made by LSP-Claw.
 
 ## HTML Form Tutorial
 
@@ -349,62 +353,60 @@ This pattern is the easiest way to understand browser-to-server interaction:
 the browser submits a normal form, and the LSP page handles the request.
 
 ```text
-Build a Mako lab app with index.lsp containing an HTML form for a simulated LED.
-On GET, show the current LED state. On POST, read the submitted form value and
-update the state. Start the lab and test both turning the LED on and off.
+Clear the lab and build an LSP app with index.lsp containing an HTML
+form for a simulated LED.  On GET, show the current LED state. On
+POST, read the submitted form value and update the state. On the
+server side, print the status by using function trace.Start the lab
+and test both turning the LED on and off.
 ```
 
-If something does not work, ask the AI-Agent to debug it:
+
+The AI-Agent should automatically test the app, but if something does not work, ask the AI-Agent to debug it:
 
 ```text
-The form is loading, but the state is not changing. Use LSP-Claw trace output
-to find the problem, fix it, and remove any temporary debug output before
-finishing.
+The form is loading, but the state is not changing. Use LSP-Claw trace
+output to find the problem by instrumenting the code, fix it, and
+remove any temporary debug output before finishing.
 ```
 
-## Fetch/AJAX Tutorial
+If you are new to LSP, open the file and study the design. The AI
+agent should have designed a standard, old-fashioned server-rendered
+page with a submit button. We can tell the AI-Agent to use JavaScript
+instead.
 
-Use this when you want the page to update without a full browser reload.
+### AJAX Example
 
 ```text
-Build a Mako lab app with index.html and api.lsp. The page should use fetch()
-to call api.lsp and update a status panel without reloading. api.lsp should
-return JSON. Include a button that toggles a simulated relay. Start the lab and
-test the button.
+In index.lsp, remove the submit button and update the UI to use
+JavaScript to automatically send the state to the server when the user
+clicks the UI.
 ```
 
-Good constraints to include:
+### GPIO Example
+
+If you are running LSP-Claw on an **ESP32** using [Xedge32](https://realtimelogic.com/downloads/bas/ESP32/?bas=), try the following prompt.
 
 ```text
-Keep the JavaScript small and dependency-free.
-Validate request data on the server.
-Return clear JSON with ok, state, and error fields.
+I have an LED connected to GPIO 1. In index.lsp, use the ESP32 GPIO
+API to turn the LED on and off when the user clicks the UI.
 ```
 
 ## Small REST API Tutorial
 
-Use this when the AI-Agent is another program, a test script, or a device.
-LSP-Examples already includes a REST example with a reusable Lua router module
-named `rest.lua`, so start there instead of building a router from scratch.
+The [GitHub repo includes a REST module](https://github.com/RealTimeLogic/LSP-Examples/tree/master/REST). The following prompt should download and use this module.
 
 ```text
-Use LSP-Claw to build a small REST API based on the REST example. If the lab
-already contains files, stop and ask before copying anything. Start the lab and
-test:
-
+Back up and clear the lab.
+Use LSP-Claw to build a small REST API based on the REST example and
+the REST module. If the lab already contains files, stop and ask
+before copying anything. Start the lab and test:
 - GET /api/users
 - POST /api/users with a JSON body containing name and email
 - GET /api/users/{id}
 - PUT /api/users/{id} with a JSON body containing name and email
 - DELETE /api/users/{id}
 Return JSON and appropriate HTTP status codes.
-```
-
-If you want to adapt the example:
-
-```text
-Use the REST example as the base. Add the routes I need, keep the router code
-reusable, and retest the API after each change.
+Create an index.html using the fetch API to test the REST API.
 ```
 
 ## Timer-Driven Status Page
@@ -413,16 +415,31 @@ Use this for background status updates, simulated sensor readings, or periodic
 maintenance.
 
 ```text
+Back up and clear the lab.
 Create a lab app with .preload and index.lsp. In .preload, start a timer that
 updates a simulated temperature value once per second. index.lsp should display
 the latest value. Start the lab and confirm the value changes over time.
-```
 
 Important constraint:
 
-```text
-Do not create a busy loop. Use the runtime's timer pattern for repeated work.
+Do not create a busy loop. Use the BAS timer API for repeated work.
 ```
+
+### Using SMQ WebSockets
+
+When we tested the above prompt, the AI-Agent created an index.lsp polling the server for updates by using `<meta http-equiv="refresh" content="2">`
+
+We can update the code to use WebSockets instead, but an even better solution is to use the [SMQ protocol](https://realtimelogic.com/ba/doc/en/SMQ.html).
+
+```text
+Remove the polling code and use the SMQ protocol to update the UI
+instead. Install an SMQ broker in the .preload script and redirect
+connection requests from index.lsp to the broker in the .preload
+script. Create an SMQ client by using the SMQ broker API and publish
+the timer updates using this server-side client using the topic
+/temperature/
+```
+
 
 ## Real-Time Browser Updates
 
@@ -436,13 +453,6 @@ then recommend whether to start from an example or build a simpler app from
 scratch. Explain your recommendation before copying anything.
 ```
 
-If you want an example-based result:
-
-```text
-Find a RealTimeLogic/LSP-Examples project suitable for real-time browser
-updates using SMQ or WebSockets. Recommend a starting point, then ask me before
-copying if the lab already contains files.
-```
 
 ## Debugging
 
@@ -487,17 +497,6 @@ When finished, summarize:
 - Any trace findings that mattered.
 - Any remaining limitations.
 - Whether temporary debug traces were removed or intentionally kept.
-```
-
-Example final report:
-
-```text
-Created tutorial-tests/form.lsp and tutorial-tests/api.lsp.
-Detected runtime: Mako.
-Tested GET and POST requests through the running lab.
-Trace output showed no Lua exceptions.
-Temporary debug traces were removed.
-Remaining limitation: state is in memory and resets when the lab restarts.
 ```
 
 ## Troubleshooting Setup
