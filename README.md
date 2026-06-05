@@ -23,7 +23,7 @@ MCP lets an AI agent use tools provided by another program. In this case:
 - LSP-Claw is the [MCP server](https://modelcontextprotocol.io/docs/getting-started/intro).
 - LSP-Claw runs as a Lua application powered by Mako, Mako with Xedge, or
   standalone Xedge on an RTOS.
-- Codex, Claude, Gemini, or another assistant is the AI agent.
+- Codex, Claude Code, Google Antigravity, or another assistant is the AI agent.
 - The lab is the Lua application area that the AI agent can inspect, edit, and
   run.
 
