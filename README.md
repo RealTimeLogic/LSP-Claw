@@ -9,7 +9,7 @@ local files, you give it access to a controlled lab app where it can
 inspect examples, create files, run the lab, and debug server-side
 Lua/LSP code.
 
-![LSP-Claw](doc/LSP-Claw.png "LSP-Claw")
+![LSP-Claw](www/LSP-Claw-Icon.png "LSP-Claw")
 
 LSP-Claw is especially useful for embedded systems. LSP-Claw can remotely
 start, stop, and replace the application being tested without restarting
