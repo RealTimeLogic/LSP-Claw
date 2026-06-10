@@ -55,9 +55,8 @@ header {
 }
 
 .mark {
-   width: 74px;
-   height: 74px;
-   border-radius: 8px;
+   width: 140px;
+   height: 140px;
    display: block;
    object-fit: contain;
 }
