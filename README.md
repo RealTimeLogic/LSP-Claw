@@ -93,8 +93,8 @@ the lab can continue uninterrupted.
 ```text
 mako -l::lsp-claw.zip # No Xedge, MCP URL http://localhost/mcp.lsp
 mako -llsp-claw::lsp-claw.zip # No Xedge, MCP URL http://localhost/lsp-claw/mcp.lsp
-mako -l::xedge.zip -l::lsp-claw.zip # Include Xedge, MCP URL http://localhost/mcp.lsp
-mako -l::xedge.zip # Only Xedge, MCP URL http://localhost/lsp-claw/mcp.lsp
+mako -l::Xedge.zip -l::lsp-claw.zip # Include Xedge, MCP URL http://localhost/mcp.lsp
+mako -l::Xedge.zip # Only Xedge, MCP URL http://localhost/lsp-claw/mcp.lsp
 ```
 
 In the last example, LSP-Claw is not loaded when Mako Server starts. Instead,
