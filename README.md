@@ -67,6 +67,15 @@ browser can be used to manually test the UI.
 ![Codex Screenshot](doc/CodexScreenshot.jpg "Codex Screenshot")
 
 
+## Download or Build LSP-Claw
+
+- Download the latest pre-built LSP-Claw: [https://makoserver.net/download/packages/lsp-claw.zip](https://makoserver.net/download/packages/lsp-claw.zip)
+
+- Build LSP claw:
+``` bash
+cd www
+zip -D -q -u -r -9 ../lsp-claw.zip .
+```
 
 ## Running LSP-Claw
 
@@ -82,9 +91,9 @@ the lab can continue uninterrupted.
 #### Command Line Examples
 
 ```text
-mako -l::LSP-Claw.zip # No Xedge, MCP URL http://localhost/mcp.lsp
-mako -llsp-claw::LSP-Claw.zip # No Xedge, MCP URL http://localhost/lsp-claw/mcp.lsp
-mako -l::xedge.zip -l::LSP-Claw.zip # Include Xedge, MCP URL http://localhost/mcp.lsp
+mako -l::lsp-claw.zip # No Xedge, MCP URL http://localhost/mcp.lsp
+mako -llsp-claw::lsp-claw.zip # No Xedge, MCP URL http://localhost/lsp-claw/mcp.lsp
+mako -l::xedge.zip -l::lsp-claw.zip # Include Xedge, MCP URL http://localhost/mcp.lsp
 mako -l::xedge.zip # Only Xedge, MCP URL http://localhost/lsp-claw/mcp.lsp
 ```
 
@@ -106,10 +115,12 @@ LSP-Claw must be installed as an Xedge application the first time Xedge starts.
 1. Open the Xedge IDE in your browser.
 2. Click the menu button in the top-right corner.
 3. Select **App Upload**.
-4. Drag and drop `LSP-Claw.zip` into the uploader.
+4. Drag and drop `lsp-claw.zip` into the uploader.
 5. Click **Save** without enabling unpacking.
 
-`LSP-Claw.zip` includes an
+See the **Xedge app installation video** in the tutorial [Xedge Application Deployment](https://realtimelogic.com/articles/Mastering-Xedge-Application-Deployment-From-Installation-to-Creation) for more information.
+
+`lsp-claw.zip` includes an
 [Xedge .config file](https://realtimelogic.com/articles/Mastering-Xedge-Application-Deployment-From-Installation-to-Creation)
 that automatically:
 
@@ -163,7 +174,7 @@ For Windows command prompt:
 ```text
 set GITHUB_TOKEN=your-github-token
 set MCP_AUTH_TOKEN=your-mcp-auth-token
-mako -l::LSP-Claw.zip
+mako -l::lsp-claw.zip
 ```
 
 You can also configure the same values in
