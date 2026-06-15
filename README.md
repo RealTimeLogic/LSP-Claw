@@ -16,6 +16,17 @@ start, stop, and replace the application being tested without restarting
 the device, RTOS, or hosting server. A monolithic RTOS device can keep
 running its core firmware while the MCP server restarts only the lab app.
 
+## Recommended Package for Mako Users
+
+If you use Mako Server, the recommended starting point is the
+[Mako Server Development Package](https://makoserver.net/documentation/developer-package/).
+This package is designed for Mako-based development and includes the tooling
+needed to use LSP-Claw in a ready-to-run Mako environment.
+
+Use the standalone LSP-Claw ZIP or source build when you are integrating
+LSP-Claw into an existing Mako installation, an Xedge deployment, or an RTOS
+target that already has its own firmware and deployment workflow.
+
 ## What MCP Means Here
 
 MCP lets an AI agent use tools provided by another program. In this case:
@@ -80,6 +91,12 @@ zip -D -q -u -r -9 ../lsp-claw.zip .
 ## Running LSP-Claw
 
 ### Using Mako with or without Xedge
+
+For Mako users, install the
+[Mako Server Development Package](https://makoserver.net/documentation/developer-package/)
+first unless you already have a working Mako environment. It is the recommended
+package because it provides a complete Mako development setup for running and
+testing LSP-Claw.
 
 When using Mako Server, you can optionally combine LSP-Claw with Xedge. Xedge
 supports executing `.xlua` files, which are small, self-contained applications
