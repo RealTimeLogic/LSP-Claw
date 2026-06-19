@@ -118,6 +118,8 @@ LSP-Claw exposes a deliberately small API.
 - `writeLabFile`
 - `clearLab`
 - `backupLab`
+- `listLabBackups`
+- `restoreLab`
 
 ### Resources
 
@@ -221,9 +223,17 @@ The lab workflow is:
 3. `writeLabFile` creates or updates lab files.
 4. `copyExampleToLab` copies a selected example app root into the lab.
 5. `backupLab` preserves lab state.
-6. `clearLab` removes lab state after explicit confirmation.
-7. `startLab` starts the lab app.
-8. `stopLab` stops the lab app.
+6. `listLabBackups` lists backup directories with numbered choices.
+7. `restoreLab` restores a selected backup after explicit confirmation.
+8. `clearLab` removes lab state after explicit confirmation.
+9. `startLab` starts the lab app.
+10. `stopLab` stops the lab app.
+
+When a user wants to restore a backup but does not know the exact backup name,
+the agent should call `listLabBackups` and present the returned choices as a
+numbered list. If the user replies with a phrase such as `Select backup 1`, the
+agent maps the number to `choices[1].backupName` and then calls `restoreLab`
+with that exact backup name after confirmation.
 
 The AI agent must not assume local filesystem access to the server. It should
 use MCP lab tools as the authority for lab state.

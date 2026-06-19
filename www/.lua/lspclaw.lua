@@ -511,6 +511,18 @@ local function listLabFileNames(appmgr, labIo, includeDirectories)
    return files, dirs
 end
 
+local function numberedBackupChoices(backups)
+   local choices = {}
+   for i, backupName in ipairs(backups or {}) do
+      tinsert(choices, {
+	 number = i,
+	 backupName = backupName,
+	 prompt = sfmt("Select backup %d", i)
+      })
+   end
+   return choices
+end
+
 local function ensureParentDirs(io, path)
    local dir = dirname(path)
    if dir == "" then return true end
@@ -883,6 +895,87 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
 	 copy = copy,
 	 movedOutOfLab = not copy
       }, runtime.warnings)
+   end)
+
+   mcp:tool("listLabBackups", {
+      description = "List available lab backup directories with numbered choices for restore selection.",
+      inputSchema = objectSchema(),
+      annotations = readAnnotations
+   }, function()
+      local runtime, runtimeErr = runtimeInfo(appmgr)
+      if not runtime then return runtimeErr end
+      local backups, err = appmgr.listBackups()
+      if not backups then return FastMCP.error("Cannot list lab backups", { code = "listLabBackupsFailed", error = err }) end
+      local choices = numberedBackupChoices(backups)
+      local nextActions = {}
+      if #choices > 0 then
+	 tinsert(nextActions, "Present these backups to the user as numbered options.")
+	 tinsert(nextActions, "If the user says \"Select backup 1\", call restoreLab with the backupName from choice number 1 after confirmation.")
+      else
+	 tinsert(nextActions, "Tell the user no lab backups were found.")
+      end
+      return result("Lab backups listed.", runtime, {
+	 backups = backups,
+	 choices = choices,
+	 backupCount = #backups
+      }, runtime.warnings, nextActions)
+   end)
+
+   mcp:tool("restoreLab", {
+      description = "Restore a named lab backup into the lab. Requires explicit confirmation.",
+      inputSchema = objectSchema({
+	 backupName = stringSchema("Backup directory name returned by listLabBackups."),
+	 confirmed = boolSchema("Must be true after explicit user confirmation.", false)
+      }, { "backupName" }),
+      annotations = destructiveAnnotations
+   }, function(args)
+      local runtime, runtimeErr = runtimeInfo(appmgr)
+      if not runtime then return runtimeErr end
+      local backupName, backupErr = validateBackupName(args.backupName)
+      if not backupName then return backupErr end
+      if args.confirmed ~= true then
+	 local backups = appmgr.listBackups() or {}
+	 return FastMCP.error("Restoring a lab backup replaces the current lab and requires confirmed = true after explicit user confirmation.", {
+	    code = "restoreLabRequiresConfirmation",
+	    requiresConfirmation = true,
+	    backupName = backupName,
+	    choices = numberedBackupChoices(backups),
+	    nextActions = {
+	       "Ask the user to confirm restoring backupName.",
+	       "If the user selected a numbered backup, map the number to choices[number].backupName before calling restoreLab."
+	    }
+	 })
+      end
+      local ok, err = appmgr.restore(backupName)
+      if not ok then
+	 local backups = appmgr.listBackups() or {}
+	 return FastMCP.error("Cannot restore lab backup", {
+	    code = "restoreLabFailed",
+	    backupName = backupName,
+	    error = err,
+	    choices = numberedBackupChoices(backups),
+	    nextActions = #backups > 0 and {
+	       "Present the available backup choices to the user.",
+	       "Ask the user to select a backup by number or exact backupName."
+	    } or {
+	       "Tell the user no matching backup was found."
+	    }
+	 })
+      end
+      local labIo, labErr = ensureLab(appmgr)
+      if not labIo then return labErr end
+      local files, dirs = listLabFileNames(appmgr, labIo, true)
+      return result("Lab backup restored.", runtime, {
+	 restored = true,
+	 backupName = backupName,
+	 files = files,
+	 directories = dirs,
+	 fileCount = #files,
+	 directoryCount = #dirs
+      }, runtime.warnings, {
+	 "Use startLab to run the restored lab.",
+	 "Use listLabFiles or readLabFile to inspect restored files."
+      })
    end)
 end
 

@@ -32,6 +32,9 @@ The server provides two distinct environments:
      - writeLabFile
      - startLab
      - stopLab
+     - backupLab
+     - listLabBackups
+     - restoreLab
      - readRuntimeTrace
 
 When using the Streamable HTTP transport, open the MCP GET SSE stream after
@@ -124,6 +127,18 @@ Recommended workflow when the user asks to design or build an app:
    readRuntimeTrace immediately after runtime actions and inspect the returned
    trace text.
 10. Use stopLab when finished or before changing startup-sensitive files.
+
+Backup restore workflow:
+
+- Use listLabBackups when the user asks what backups exist or wants to restore
+  a previous lab.
+- Present listLabBackups choices as numbered options. If the user says
+  "Select backup 1", map 1 to choices[1].backupName and use that exact
+  backupName.
+- restoreLab replaces the current lab and requires explicit confirmation.
+- If restoreLab reports that a backup was not found, show the numbered backup
+  choices returned by the tool and ask the user to select one by number or exact
+  backupName.
 
 Runtime debugging pattern:
 

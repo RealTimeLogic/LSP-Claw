@@ -404,6 +404,68 @@ nil, err
 Use this before copying a new example when the user chooses to preserve existing
 lab files.
 
+## appmgr.listBackups()
+
+Lists backup directories under `lsplab-backup`.
+
+```lua
+local backups, err = appmgr.listBackups()
+```
+
+The lab must already be created so the backup storage IO is initialized.
+
+On success, returns a sorted array of backup directory names:
+
+```lua
+{
+   "before-edit",
+   "old-project"
+}
+```
+
+On failure:
+
+```lua
+nil, err
+```
+
+MCP tools should present these names as numbered choices when asking a user
+which backup to restore.
+
+## appmgr.restore(name)
+
+Restores a named backup into the lab.
+
+```lua
+local ok, err = appmgr.restore(name)
+```
+
+Parameters:
+
+| Parameter | Type | Description |
+|---|---:|---|
+| `name` | string | Backup directory name under `lsplab-backup`. |
+
+The selected backup is copied into a temporary staging directory first. Only
+after staging succeeds does `restore` clear and replace the current lab. If the
+backup cannot be read, the current lab is left unchanged and the staging
+directory is removed.
+
+On success:
+
+```lua
+true
+```
+
+On failure:
+
+```lua
+nil, err
+```
+
+This is destructive because it replaces the current lab. An MCP tool that
+exposes this function should require explicit user confirmation.
+
 ## appmgr.rmlab()
 
 Removes all resources in the lab.

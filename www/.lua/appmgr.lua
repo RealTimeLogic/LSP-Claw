@@ -241,6 +241,42 @@ function appmgr.backup(name, copy)
    return copyDir(labIo, "", toIo, copy, #bio:realpath""+1)
 end
 
+function appmgr.listBackups()
+   if not backupIo then return nil,"backup storage not created" end
+   local backups={}
+   for name,isdir in backupIo:files("", true) do
+      if isdir and name ~= "." and name ~= ".." then
+	 tinsert(backups,name)
+      end
+   end
+   table.sort(backups)
+   return backups
+end
+
+function appmgr.restore(name)
+   if not labIo then return nil,"lab not created" end
+   if not backupIo then return nil,"backup storage not created" end
+   local st=backupIo:stat(name)
+   if not st then return nil,sfmt("backup %s not found",name) end
+   if not st.isdir then return nil,sfmt("backup %s is not a directory",name) end
+   local stageIo,stageName,err=createStageIo()
+   if not stageIo then return nil,err end
+   local ok
+   ok,err=copyDirContents(backupIo, name, stageIo)
+   if not ok then
+      removeStage(stageIo, stageName)
+      return nil,err
+   end
+   ok,err=appmgr.rmlab()
+   if not ok then
+      removeStage(stageIo, stageName)
+      return nil,err
+   end
+   ok,err=copyDirContents(stageIo, "", labIo)
+   removeStage(stageIo, stageName)
+   return ok,err
+end
+
 function appmgr.rmlab()
    if not labIo then return nil,"lab not created" end
    return removeAll(labIo)
