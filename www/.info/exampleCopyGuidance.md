@@ -1,0 +1,5 @@
+- Select the runnable app directory as sourcePath after reading the catalog and the example AGENTS.md.
+- copyExampleToLab copies the contents of sourcePath into the lab root and strips the selected sourcePath prefix.
+- Do not include wrapper directories in the lab unless the wrapper is intentionally part of the runnable app.
+- For AJAX, use sourcePath = AJAX/www so the lab contains index.lsp, not AJAX/www/index.lsp or www/index.lsp.
+- For Light-Dashboard/custom, the lab receives the contents of custom/ at the lab root.

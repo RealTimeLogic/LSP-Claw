@@ -1,0 +1,2 @@
+- Ask the user to choose a conflictAction.
+- Call copyExampleToLab with confirmed = true only after user confirmation.

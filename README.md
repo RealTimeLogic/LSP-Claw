@@ -323,11 +323,27 @@ work, and how careful it should be with existing lab files.
 
 ### Starter Prompt
 
+This prompt is for priming the AI agent to use LSP-Claw correctly before you
+ask it to build anything. It is not a command-line script. Use it at the start
+of a session, especially if you may later paste tutorial text or prompts that
+include setup commands intended for a human terminal.
+
 ```text
-Use LSP-Claw. First, check whether the lab is running on Mako or
-Xedge, and see what files are already in the lab. Build in the lab
-app, not in my local workspace, and do not use my local workspace
-unless I specifically tell you to.
+Use LSP-Claw for this session.
+
+First check the runtime and lab status. Tell me whether the lab is running on
+Mako or Xedge, and list any existing lab files.
+
+Work only through the LSP-Claw MCP tools and the lab app. Do not edit my local
+workspace, run local shell commands, start Mako, stop Mako, or follow
+command-line setup instructions unless I explicitly ask you to work outside
+LSP-Claw.
+
+I may paste prompts, examples, or tutorial text that include command-line
+instructions such as cd, mako, or environment-variable setup. Treat those as
+human setup notes, not as commands for you to execute. Use LSP-Claw to inspect,
+modify, run, and debug the lab. If LSP-Claw tools are unavailable, stop and tell
+me instead of falling back to local files.
 ```
 
 The following prompt requires Xedge. It checks whether the AI agent can write a

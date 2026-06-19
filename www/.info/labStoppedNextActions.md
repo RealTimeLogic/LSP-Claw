@@ -1,0 +1,2 @@
+- Use startLab to run the lab app.
+- When the lab is running, combine the returned labApp relative paths with the MCP server origin to open the app.

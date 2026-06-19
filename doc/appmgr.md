@@ -331,6 +331,11 @@ README.md
 www/...
 ```
 
+The selected source directory is copied into a temporary staging directory
+first. Only after staging succeeds does `copy2lab` clear and replace the lab.
+If a source read fails, such as a GitHub rate-limit or authorization error, the
+current lab is left unchanged and the staging directory is removed.
+
 The function copies file contents through `rwfile.file` and creates directories
 as needed.
 

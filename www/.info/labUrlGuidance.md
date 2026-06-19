@@ -1,0 +1,1 @@
+Paths are relative to the BAS/MCP server origin. Derive the full URL by combining the MCP server scheme, host, and port with the path. For example, / means http://localhost/ when localhost is the MCP server address.

@@ -132,12 +132,29 @@ local function authorizeRequest(origin, cmd, ctx)
    return authorizeBearerToken(cmd)
 end
 
+local function tokenConfigured(token)
+   return token ~= nil and token ~= ""
+end
+
+local function getConfigurationStatus()
+   local baseUri = ""
+   if dir and type(dir.baseuri) == "function" then
+      baseUri = dir:baseuri() or ""
+   end
+   return {
+      githubTokenSet = tokenConfigured(GITHUB_TOKEN),
+      mcpAuthTokenSet = tokenConfigured(MCP_AUTH_TOKEN),
+      setupBaseUri = baseUri
+   }
+end
+
 -- Codex, add code here
 require"lspclaw".register(mcp, ghio, info, appmgr, {
    instructions = mcp.instructions,
    io = io,
    runtimeTrace = runtimeTrace,
-   runtimeTraceBufferSize = runtimeTraceBufferSize
+   runtimeTraceBufferSize = runtimeTraceBufferSize,
+   configurationStatus = getConfigurationStatus
 })
 
 function app.setRuntimeTraceBufferSize(size)

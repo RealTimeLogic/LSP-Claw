@@ -197,6 +197,42 @@ local function copyDirContents(fromIo, basePath, toIo)
    return nil,err
 end
 
+local function removeAll(io)
+   local errList,ok,err={}
+   local list,rlist={},{}
+   for path,name in recDirIter(io,"",true) do
+      if name then
+	 local fname=filePath(path,name)
+	 ok,err=io:remove(fname)
+	 if not ok then tinsert(errList,sfmt("%s: %s",fname,err)) end
+      else
+	 tinsert(list, path)
+      end
+   end
+   for i = #list, 1, -1 do tinsert(rlist, list[i]) end
+   for _,n in ipairs(rlist) do
+      ok,err=io:rmdir(n)
+      if not ok then tinsert(errList,sfmt("%s: %s",n,err)) end
+   end
+   if 0 == #errList then return true end
+   return nil,table.concat(errList,"\n")
+end
+
+local function createStageIo()
+   for i = 1, 1000 do
+      local name=sfmt("%s-stage-%d-%d", labn, os.time(), i)
+      if not bio:stat(name) then
+	 local stageIo,err=mkio(bio,name)
+	 return stageIo,name,err
+      end
+   end
+   return nil,nil,"Cannot create unique staging directory"
+end
+
+local function removeStage(stageIo, stageName)
+   if stageIo then removeAll(stageIo) end
+   if stageName then bio:rmdir(stageName) end
+end
 
 function appmgr.backup(name, copy)
    if not labIo then return nil,"lab not created" end
@@ -206,26 +242,8 @@ function appmgr.backup(name, copy)
 end
 
 function appmgr.rmlab()
-   local errList,ok,err={}
    if not labIo then return nil,"lab not created" end
-   local list,rlist={},{}
-   for path,name in recDirIter(labIo,"",true) do
-      if name then
-	 local fname=filePath(path,name)
-	 ok,err=labIo:remove(fname)
-	 if not ok then tinsert(errList,sfmt("%s: %s",fname,err)) end
-      else
-	 tinsert(list, path)
-      end
-   end
-   for i = #list, 1, -1 do tinsert(rlist, list[i]) end
-   list={}
-   for _,n in ipairs(rlist) do
-      ok,err=labIo:rmdir(n)
-      if not ok then tinsert(errList,sfmt("%s: %s",n,err)) end
-   end
-   if 0 == #errList then return true end
-   return nil,table.concat(errList,"\n")
+   return removeAll(labIo)
 end
 
 function appmgr.copy2lab(ghio,path)
@@ -233,7 +251,23 @@ function appmgr.copy2lab(ghio,path)
    local st,err=ghio:stat(path)
    if not st then return nil,sfmt("stat %s: %s",path,err) end
    if not st.isdir then return nil,sfmt("%s not a directory",path) end
-   return copyDirContents(ghio, path, labIo)
+   local stageIo,stageName
+   stageIo,stageName,err=createStageIo()
+   if not stageIo then return nil,err end
+   local ok
+   ok,err=copyDirContents(ghio, path, stageIo)
+   if not ok then
+      removeStage(stageIo, stageName)
+      return nil,err
+   end
+   ok,err=appmgr.rmlab()
+   if not ok then
+      removeStage(stageIo, stageName)
+      return nil,err
+   end
+   ok,err=copyDirContents(stageIo, "", labIo)
+   removeStage(stageIo, stageName)
+   return ok,err
 end
 
 return appmgr

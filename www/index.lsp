@@ -74,7 +74,7 @@ local authSet = authToken ~= nil and authToken ~= ""
                <h1>LSP-Claw</h1>
                <p class="subtitle">
                   MCP setup for BAS, Mako Server, and Xedge<br>
-                  <a class="doc-link" href="https://github.com/RealTimeLogic/LSP-Claw/blob/main/README.md#first-useful-prompt" target="_blank" rel="noopener">LSP-Claw Tutorial</a>
+                  <a class="doc-link" href="https://github.com/RealTimeLogic/LSP-Claw#first-useful-prompt" target="_blank" rel="noopener">LSP-Claw prompt tutorial</a>
                </p>
             </div>
          </div>

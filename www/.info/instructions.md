@@ -1,7 +1,7 @@
 This MCP server helps AI agents build Barracuda App Server (BAS), Mako Server,
 Xedge, and Xedge32 applications. It supports two main workflows:
 
-1. Find, inspect, copy, and adapt examples from the RealTimeLogic/LSP-Examples
+1. Select, read, copy, and adapt examples from the RealTimeLogic/LSP-Examples
    GitHub repository.
 2. Design and build a new lab application directly from the user's request by
    creating and editing files through the MCP tools.
@@ -15,11 +15,9 @@ The server provides two distinct environments:
 
 1. GitHub source examples
    - Read-only reference material.
-   - Used for inspection, learning, and copying starter projects.
+   - Used for selecting, reading, and copying starter projects.
    - Accessed with tools such as:
-     - suggestExample
-     - inspectExample
-     - prepareExampleForAi
+     - getExampleCatalog
      - readExampleFile
 
 2. Local lab app
@@ -28,7 +26,6 @@ The server provides two distinct environments:
      new app from scratch.
    - Accessed with tools such as:
      - createLab
-     - planCopyExampleToLab
      - copyExampleToLab
      - listLabFiles
      - readLabFile
@@ -69,33 +66,45 @@ instead of localhost.
 
 Recommended workflow when the user asks which GitHub example to use:
 
-1. Use suggestExample to find a suitable example.
-2. Use inspectExample and prepareExampleForAi to understand the example.
-3. Use planCopyExampleToLab before copying.
-4. Use copyExampleToLab to create a local editable lab.
-5. Open the Streamable HTTP GET SSE stream before running the lab.
-6. Use lab tools for all further edits.
-7. Use startLab to run the lab and monitor trace notifications for errors.
-8. If trace notifications are not visible to the agent/model, call
+1. Use getExampleCatalog to read the AI catalog.
+2. Select the example yourself from catalog summary, topics, useWhen,
+   avoidWhen, compatibility, variants, defaultVariant, and run fields.
+3. Use readExampleFile to read the selected example's AGENTS.md, for example
+   AJAX/AGENTS.md or Light-Dashboard/AGENTS.md.
+4. Follow the selected AGENTS.md file. Read the README, variant README, design
+   note, or source files it directs you to read before copying or editing.
+5. Choose the exact GitHub source directory to copy. The sourcePath must be a
+   runnable app directory such as AJAX/www, Light-Dashboard/custom, or
+   SMQ-examples/RPC/www.
+6. Use copyExampleToLab with the explicit sourcePath to create a local editable
+   lab. copyExampleToLab copies the contents of sourcePath into the lab root
+   and strips the selected sourcePath prefix. For example, sourcePath AJAX/www
+   creates lab/index.lsp, not lab/AJAX/www/index.lsp or lab/www/index.lsp.
+7. Open the Streamable HTTP GET SSE stream before running the lab.
+8. Use lab tools for all further edits.
+9. Use startLab to run the lab and monitor trace notifications for errors.
+10. If trace notifications are not visible to the agent/model, call
    readRuntimeTrace immediately after startLab.
 
 Example selection guidance:
 
-- Treat suggestExample results as candidates, not decisions.
-- Prefer examples whose summary, goodFor notes, tags, and important files match
-  the user's requested workflow.
-- Do not choose an example only because it has the highest score.
-- Treat broad token matches such as "Mako", "LSP", "HTML", "POST", or "app" as
-  weak evidence.
-- If a lower-ranked example clearly fits better, explain that and choose it.
+- LSP-Claw does not rank or recommend examples. The AI agent is responsible for
+  choosing the example.
+- Prefer examples whose summary, useWhen notes, topics, protocols, variants,
+  defaultVariant, and run commands match the user's requested workflow.
+- Use avoidWhen to reject examples that appear superficially related but do not
+  fit the user's goal.
 - If the user's request is specific enough to implement directly, build from
   scratch instead of forcing an example workflow.
-- Inspect likely matches before recommending or copying.
+- Read the selected example's AGENTS.md before recommending or copying.
+- When copying an example, choose the app root directory whose contents should
+  become the lab root. Do not copy a parent example directory if that would
+  leave wrapper directories such as www/ inside the lab.
 
 For example, if the user asks for a simple HTML form that updates a simulated
 LED state, a basic form or small request/response example is usually more
 appropriate than a logging, debugging, upload, or database example, even if one
-of those scores higher.
+of those has overlapping keywords.
 
 Recommended workflow when the user asks to design or build an app:
 

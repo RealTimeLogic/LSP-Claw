@@ -1,0 +1,3 @@
+- Use listLabFiles or readLabFile to inspect the copied lab.
+- The copiedFiles paths are lab-root paths after stripping sourcePath.
+- Use startLab to run it.
