@@ -9,6 +9,11 @@ local files, you give it access to a controlled lab app where it can
 inspect examples, create files, run the lab, and debug server-side
 Lua/LSP code.
 
+> **New to LSP-Claw?** Watch the
+> [LSP-Claw introduction video](https://youtu.be/z3wQHM6MDC4) for a
+> high-level overview of what LSP-Claw is and how it fits into
+> AI-assisted Mako/Xedge development.
+
 ![LSP-Claw](www/LSP-Claw-Icon.png "LSP-Claw")
 
 LSP-Claw is especially useful for embedded systems. LSP-Claw can remotely
