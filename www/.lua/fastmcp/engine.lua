@@ -558,11 +558,16 @@ function FastMCP:capabilities()
    return caps
 end
 
-function FastMCP:initializeResult(params)
+function FastMCP:initializeResult(params, ctx)
    params = params or {}
    local requested = params.protocolVersion
    local protocolVersion = FastMCP.supportedProtocolVersions[requested] and requested or FastMCP.protocolVersionDefault
-   return {
+   local instructions = self.instructions
+   if type(instructions) == "function" then
+      local ok, value = pcall(instructions, ctx or {})
+      instructions = ok and value or nil
+   end
+   local result = {
       protocolVersion = protocolVersion,
       serverInfo = {
 	 name = self.name,
@@ -571,9 +576,16 @@ function FastMCP:initializeResult(params)
 	 websiteUrl = self.websiteUrl,
 	 icons = self.icons
       },
-      instructions = self.instructions,
+      instructions = instructions,
       capabilities = self:capabilities()
    }
+   if ctx and ctx.serverOrigin then
+      result._meta = {
+	 serverOrigin = ctx.serverOrigin,
+	 urlGuidance = "Server-derived URLs are advisory. Prefer tool-result URLs when present."
+      }
+   end
+   return result
 end
 
 -- Has cap logging, but not implemented

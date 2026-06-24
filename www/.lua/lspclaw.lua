@@ -219,12 +219,30 @@ local function normalizedSetupPath(baseUri)
    return baseUri
 end
 
-local function configurationStatus()
+local function requestOrigin(ctx)
+   if type(ctx) ~= "table" then return nil end
+   if type(ctx.serverOrigin) == "string" and ctx.serverOrigin ~= "" then return ctx.serverOrigin end
+   if type(ctx.server) == "table" and type(ctx.server.origin) == "string" and ctx.server.origin ~= "" then
+      return ctx.server.origin
+   end
+   return nil
+end
+
+local function absoluteUrl(origin, path)
+   if not origin then return nil end
+   path = tostring(path or "/")
+   if path == "" then path = "/" end
+   if path:sub(1, 1) ~= "/" then path = "/" .. path end
+   return origin:gsub("/+$", "") .. path
+end
+
+local function configurationStatus(ctx)
    local status = {}
    if type(configurationStatusProvider) == "function" then
       status = configurationStatusProvider() or {}
    end
    local setupPath = normalizedSetupPath(status.setupBaseUri)
+   local origin = requestOrigin(ctx)
    local githubTokenSet = status.githubTokenSet == true
    local mcpAuthTokenSet = status.mcpAuthTokenSet == true
    local warnings = {}
@@ -252,13 +270,15 @@ local function configurationStatus()
       setupPage = {
 	 baseUri = status.setupBaseUri or "",
 	 path = setupPath,
+	 url = absoluteUrl(origin, setupPath),
+	 serverOrigin = origin,
 	 urlTemplate = "http://<mcp-server-address>" .. setupPath,
-	 guidance = "When LSP-Claw is already running, configure tokens from the browser setup page. Replace <mcp-server-address> with the host or IP address serving this MCP app."
+	 guidance = "When LSP-Claw is already running, configure tokens from the browser setup page. Use setupPage.url when present; otherwise replace <mcp-server-address> in urlTemplate with the host or IP address serving this MCP app."
       }
    }, warnings
 end
 
-local function runtimeInfo(appmgr)
+local function runtimeInfo(appmgr, ctx)
    local labIo, executeIoOrErr = ensureLab(appmgr)
    if not labIo then return nil, executeIoOrErr end
    local _, executeIo = labIo, executeIoOrErr
@@ -280,7 +300,7 @@ local function runtimeInfo(appmgr)
       local warning = markdownText(".info/runtimeWarningUnknownHost.md")
       if warning then tinsert(warnings, warning) end
    end
-   local configuration, configurationWarnings = configurationStatus()
+   local configuration, configurationWarnings = configurationStatus(ctx)
    for _, warning in ipairs(configurationWarnings or {}) do
       tinsert(warnings, warning)
    end
@@ -394,16 +414,27 @@ local function runtimeWarnings(runtime, analysis)
    return warnings
 end
 
-local function labAppPaths(files)
+local function labAppPaths(files, ctx)
    local has = {}
    for _, file in ipairs(files or {}) do has[file] = true end
    local entryPaths = { "/" }
    if has["index.lsp"] then tinsert(entryPaths, "/index.lsp") end
    if has["index.html"] then tinsert(entryPaths, "/index.html") end
+   local origin = requestOrigin(ctx)
+   local entryUrls
+   if origin then
+      entryUrls = {}
+      for _, path in ipairs(entryPaths) do
+	 tinsert(entryUrls, absoluteUrl(origin, path))
+      end
+   end
    return {
       mountPath = "/",
       appPath = "/",
+      serverOrigin = origin,
+      appUrl = absoluteUrl(origin, "/"),
       entryPaths = entryPaths,
+      entryUrls = entryUrls,
       commonEntryPaths = { "/", "/index.lsp", "/index.html" },
       urlGuidance = markdownText(".info/labUrlGuidance.md")
    }
@@ -454,10 +485,10 @@ local function appendList(target, source)
    return target
 end
 
-local function labStatusData(appmgr)
+local function labStatusData(appmgr, ctx)
    local labIo, executeIoOrErr = ensureLab(appmgr)
    if not labIo then return nil, executeIoOrErr end
-   local runtime, runtimeErr = runtimeInfo(appmgr)
+   local runtime, runtimeErr = runtimeInfo(appmgr, ctx)
    if not runtime then return nil, runtimeErr end
    local topMap, top = {}, {}
    local files, dirs = {}, {}
@@ -486,7 +517,7 @@ local function labStatusData(appmgr)
       topLevelEntries = top,
       files = files,
       directories = dirs,
-      labApp = labAppPaths(files)
+      labApp = labAppPaths(files, ctx)
    }, runtime
 end
 
@@ -545,8 +576,8 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
       description = "Return Mako/Xedge runtime details for the LSP-Claw lab.",
       inputSchema = objectSchema(),
       annotations = readAnnotations
-   }, function()
-      local runtime, err = runtimeInfo(appmgr)
+   }, function(args, ctx)
+      local runtime, err = runtimeInfo(appmgr, ctx)
       if not runtime then return err end
       return result("Runtime information returned.", runtime, nil, runtime.warnings)
    end)
@@ -575,8 +606,8 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
       description = "Return lab runtime, running state, file counts, top-level entries, and file lists.",
       inputSchema = objectSchema(),
       annotations = readAnnotations
-   }, function()
-      local status, runtimeOrErr = labStatusData(appmgr)
+   }, function(args, ctx)
+      local status, runtimeOrErr = labStatusData(appmgr, ctx)
       if not status then return runtimeOrErr end
       local nextActions = status.running and labOpenNextActions(infoIo) or labStoppedNextActions()
       return result("Lab status returned.", runtimeOrErr, status, runtimeOrErr.warnings, nextActions)
@@ -586,10 +617,10 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
       description = "Create the local LSP-Claw lab storage if it does not already exist.",
       inputSchema = objectSchema(),
       annotations = mutateAnnotations
-   }, function()
+   }, function(args, ctx)
       local labIo, executeIoOrErr = ensureLab(appmgr)
       if not labIo then return executeIoOrErr end
-      local runtime = runtimeInfo(appmgr)
+      local runtime = runtimeInfo(appmgr, ctx)
       return result("Lab is ready.", runtime, { created = true }, runtime.warnings)
    end)
 
@@ -597,24 +628,24 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
       description = "Start the lab app through appmgr.",
       inputSchema = objectSchema(),
       annotations = mutateAnnotations
-   }, function()
+   }, function(args, ctx)
       local labIo, executeIoOrErr = ensureLab(appmgr)
       if not labIo then return executeIoOrErr end
-      local runtime = runtimeInfo(appmgr)
+      local runtime = runtimeInfo(appmgr, ctx)
       local files = listLabFileNames(appmgr, labIo, false)
       local hasXlua = false
       for _, file in ipairs(files) do if endsWith(lower(file), ".xlua") then hasXlua = true end end
       local warnings = runtimeWarnings(runtime, { hasXlua = hasXlua })
       if appmgr.running() then
-	 local data = { started = false, alreadyRunning = true, labApp = labAppPaths(files) }
+	 local data = { started = false, alreadyRunning = true, labApp = labAppPaths(files, ctx) }
 	 return result("Lab is already running.", runtime, data, warnings, labOpenNextActions(infoIo))
       end
       local ok, err = appmgr.start()
-      runtime = runtimeInfo(appmgr)
+      runtime = runtimeInfo(appmgr, ctx)
       if not ok then
 	 return FastMCP.error("Cannot start lab", { code = "startLabFailed", error = err })
       end
-      local data = { started = true, labApp = labAppPaths(files) }
+      local data = { started = true, labApp = labAppPaths(files, ctx) }
       local nextActions = labOpenNextActions(infoIo)
       appendList(nextActions, labStartedExtraNextActions())
       return result("Lab started.", runtime, data, warnings, nextActions)
@@ -624,14 +655,14 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
       description = "Stop the lab app through appmgr.",
       inputSchema = objectSchema(),
       annotations = mutateAnnotations
-   }, function()
-      local runtime, runtimeErr = runtimeInfo(appmgr)
+   }, function(args, ctx)
+      local runtime, runtimeErr = runtimeInfo(appmgr, ctx)
       if not runtime then return runtimeErr end
       if not appmgr.running() then
 	 return result("Lab is already stopped.", runtime, { stopped = false, alreadyStopped = true }, runtime.warnings)
       end
       local ok, err = appmgr.stop()
-      runtime = runtimeInfo(appmgr)
+      runtime = runtimeInfo(appmgr, ctx)
       if not ok then
 	 return FastMCP.error("Cannot stop lab", { code = "stopLabFailed", error = err })
       end
@@ -994,8 +1025,8 @@ local function registerResources(mcp, ghio, info, appmgr, instructions, infoIo)
       description = "Current Mako/Xedge runtime details.",
       mimeType = "application/json",
       annotations = readAnnotations
-   }, function()
-      local runtime, err = runtimeInfo(appmgr)
+   }, function(ctx)
+      local runtime, err = runtimeInfo(appmgr, ctx)
       if not runtime then return err end
       return runtime
    end)
@@ -1005,8 +1036,8 @@ local function registerResources(mcp, ghio, info, appmgr, instructions, infoIo)
       description = "Current lab status and file summary.",
       mimeType = "application/json",
       annotations = readAnnotations
-   }, function()
-      local status, err = labStatusData(appmgr)
+   }, function(ctx)
+      local status, err = labStatusData(appmgr, ctx)
       if not status then return err end
       return status
    end)

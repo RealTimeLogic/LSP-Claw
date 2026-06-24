@@ -90,8 +90,53 @@ local function sessionHeader(cmd)
    return cmd:header("MCP-Session-Id") or cmd:header("Mcp-Session-Id")
 end
 
+local function firstHeaderValue(value)
+   if type(value) ~= "string" then return nil end
+   value = value:match("^%s*([^,]+)") or value
+   value = value:gsub("^%s+", ""):gsub("%s+$", "")
+   return value ~= "" and value or nil
+end
+
+local function forwardedParam(value, name)
+   value = firstHeaderValue(value)
+   if not value then return nil end
+   local pattern = name .. '="?([^";,]+)"?'
+   return value:match(pattern)
+end
+
+local function safeHost(value)
+   value = firstHeaderValue(value)
+   if not value or value:find("[\r\n]") then return nil end
+   if not value:match("^[%w%-%._:%[%]]+$") then return nil end
+   return value
+end
+
+local function safeProto(value)
+   value = string.lower(firstHeaderValue(value) or "")
+   if value == "http" or value == "https" then return value end
+   return nil
+end
+
+local function requestServer(cmd)
+   local forwarded = cmd:header("Forwarded")
+   local host = safeHost(cmd:header("X-Forwarded-Host")) or
+	 safeHost(forwardedParam(forwarded, "host")) or
+	 safeHost(cmd:header("Host"))
+   if not host then return nil end
+   local proto = safeProto(cmd:header("X-Forwarded-Proto")) or
+	 safeProto(forwardedParam(forwarded, "proto")) or
+	 "http"
+   return {
+      origin = proto .. "://" .. host,
+      host = host,
+      protocol = proto,
+      advisory = true
+   }
+end
+
 local function newContext(cmd,request,session,stream)
    local requestId = request and request.id or nil
+   local server = requestServer(cmd)
    return {
       requestId = requestId and tostring(requestId) or tostring(os.time()) .. "-" .. tostring(math.random(1000000)),
       headers = {
@@ -100,8 +145,14 @@ local function newContext(cmd,request,session,stream)
 	 contentType = cmd:header("Content-Type"),
 	 protocolVersion = cmd:header("MCP-Protocol-Version"),
 	 sessionId = sessionHeader(cmd),
-	 authorization = cmd:header("Authorization")
+	 authorization = cmd:header("Authorization"),
+	 host = cmd:header("Host"),
+	 forwardedHost = cmd:header("X-Forwarded-Host"),
+	 forwardedProto = cmd:header("X-Forwarded-Proto"),
+	 forwarded = cmd:header("Forwarded")
       },
+      server = server,
+      serverOrigin = server and server.origin or nil,
       session = session,
       sessionId = session and session.id or nil,
       client = session and session.client or nil,

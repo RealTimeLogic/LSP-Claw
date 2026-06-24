@@ -304,7 +304,7 @@ local function dispatchRequestProt(mcp, msg, ctx)
 	 info = params.clientInfo,
 	 capabilities = params.capabilities
       }
-      return mcp:initializeResult(params)
+      return mcp:initializeResult(params, ctx)
    elseif method == "ping" then
       return {}
    elseif method == "tools/list" then

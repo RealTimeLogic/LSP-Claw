@@ -60,12 +60,11 @@ truncated, and droppedBytes fields before relying on the beginning of the trace
 text. This is a compatibility fallback; live notifications/message events
 remain the preferred real-time signal.
 
-Tool responses such as getLabStatus and startLab may include labApp paths. These
-paths are relative to the BAS/MCP server origin. Derive the full browser URL by
-combining the MCP server scheme, host, and port with the returned path. For
-example, if the MCP server is http://localhost/lsp-claw/mcp.lsp, lab path /
-means http://localhost/. If the MCP server is remote, use that remote host
-instead of localhost.
+Tool responses such as getLabStatus and startLab may include labApp.appUrl and
+labApp.entryUrls. Prefer those absolute URLs when present. If only relative
+labApp paths are available, derive the full browser URL by combining the MCP
+server scheme, host, and port with the returned path. Do not assume localhost
+unless the MCP server itself is running on localhost.
 
 Recommended workflow when the user asks which GitHub example to use:
 

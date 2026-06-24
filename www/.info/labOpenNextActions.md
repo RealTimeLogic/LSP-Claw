@@ -1,3 +1,3 @@
-- Open http://localhost/ to view the lab app, where localhost is the MCP server address. If the MCP server is remote, replace localhost with that host name or IP address.
-- The returned labApp paths are relative to the MCP server origin; combine the MCP scheme, host, and port with the relative path.
+- Open labApp.appUrl, or one of the labApp.entryUrls, when those fields are present in the tool response.
+- If only relative labApp paths are available, combine the MCP scheme, host, and port with the returned path. Do not assume localhost unless the MCP server itself is running on localhost.
 - After requesting a page, inspect trace notifications or call readRuntimeTrace to check for LSP/Lua errors.
