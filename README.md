@@ -82,6 +82,13 @@ browser can be used to manually test the UI.
 
 ![Codex Screenshot](doc/CodexScreenshot.jpg "Codex Screenshot")
 
+## Examples and Tutorials
+
+- A practical example is the LSP-Claw generated [ASUSWRT-style router interface](https://minnow.realtimelogic.com/asus/ai-prompt.html). The link opens the page that explains the prompt and shows how the router interface was created. The page itself is also part of the generated router UI.
+- The article [Vibe Coding Embedded Web Interfaces](https://realtimelogic.com/articles/Vibe-Coding-Embedded-Web-Interfaces) provides additional examples.
+- The [Blob Arena Multiplayer Game Article](https://makoserver.net/articles/Blob-Arena-Multiplayer-Game) shows how to design a game and explains Spec-Driven AI Development.
+- The video [LSP-Claw: Safer AI-assisted development for embedded web applications](https://youtu.be/z3wQHM6MDC4) provides a high-level overview.
+
 
 ## Download or Build LSP-Claw
 
@@ -182,7 +189,8 @@ that can connect to it.
 ### Mako Token Configuration
 
 When running LSP-Claw under Mako Server, tokens can be configured with
-environment variables before starting Mako:
+environment variables before starting Mako, but it's easier to use the
+Web Token Configuration, explained below.
 
 ```text
 GITHUB_TOKEN=your-github-token
@@ -219,7 +227,10 @@ alias:
 http://localhost/index.lsp
 ```
 
-If LSP-Claw is installed under the packaged Xedge base URL, use:
+If LSP-Claw is installed under the packaged Xedge base URL, or if you
+are using the
+[mako.zip Developer Edition](https://makoserver.net/documentation/developer-package/#makozip),
+use:
 
 ```text
 http://localhost/lsp-claw/index.lsp
