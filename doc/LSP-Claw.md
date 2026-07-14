@@ -370,10 +370,17 @@ missing. It should explain that a missing GitHub token can cause unauthenticated
 GitHub rate limits, while a missing MCP auth token means any client that can
 reach the endpoint can use the MCP server.
 
-If GitHub returns 401 for a configured token, public GET operations retry once
-without authentication and subsequent public reads remain anonymous for that
-process. The rejection is traced so the operator can replace the token. Write
-operations continue to require the configured credential and never fall back.
+LSP-Claw enables `GitHubIo`'s public archive fallback with a writable cache IO.
+When no GitHub token is configured, example `stat`, directory iteration, and
+file reads use the repository ZIP from `codeload.github.com`, opened through BAS
+`ZipIo`. This avoids consuming the anonymous Contents API quota.
+
+If GitHub returns 401 for a configured token, the rejection is traced and the
+read is retried without authentication. If that retry is rate limited, public
+example IO switches to the ZIP snapshot for the remainder of the process. The
+archive is downloaded once to `LSP-Claw-GitHub-ReadCache.zip`; it is a runtime
+cache and is ignored by Git. Write operations continue to require the configured
+credential and never use the public archive fallback.
 
 If no MCP auth token is set, the MCP endpoint is unauthenticated. If a token is
 set, MCP clients must provide the configured bearer token.

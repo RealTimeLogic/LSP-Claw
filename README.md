@@ -239,15 +239,19 @@ LSP-Claw can use two optional tokens:
 The GitHub token is for outbound GitHub access only. It does not authenticate
 MCP clients. The MCP authentication token is what protects the MCP server.
 
-Both tokens are optional. If no GitHub token is configured, LSP-Claw can still
-work, but GitHub access is subject to unauthenticated rate limits. If no MCP
-authentication token is configured, the MCP endpoint is reachable by any client
-that can connect to it.
+Both tokens are optional. Without a GitHub token, LSP-Claw serves public example
+IO from a GitHub repository ZIP downloaded through `codeload.github.com` and
+opened with BAS `ZipIo`; GitHub API-only operations remain subject to anonymous
+rate limits. If no MCP authentication token is configured, the MCP endpoint is
+reachable by any client that can connect to it.
 
 If GitHub rejects a configured token during a public read, LSP-Claw records the
-rejection and retries public repository reads without authentication. Replace
-the invalid token to regain authenticated rate limits. GitHub write operations
-never fall back to anonymous access.
+rejection. When an anonymous retry is unavailable or rate limited, public
+example metadata, directory iteration, and file reads switch to the same ZIP
+snapshot. The snapshot is downloaded once per server process and stored in the
+ignored runtime file `LSP-Claw-GitHub-ReadCache.zip`. Replace an invalid token
+to regain authenticated API access. GitHub write operations never use the
+public snapshot or fall back to anonymous access.
 
 ### Mako Token Configuration
 

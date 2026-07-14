@@ -39,7 +39,13 @@ local function create(op)
    local branch = op.branch or "main"
    local base	= api .. "/repos/" .. op.owner .. "/" .. op.repo .. "/contents/"
    local repoBase = api .. "/repos/" .. op.owner .. "/" .. op.repo
-   local readTokenEnabled = op.token and true or false
+   local tokenConfigured = op.token and op.token ~= "" and true or false
+   local readTokenEnabled = tokenConfigured
+   local archiveCacheIo = op.archiveCacheIo
+   local archiveCachePath = op.archiveCachePath or "GitHubIo-Public-Read-Cache.zip"
+   local publicArchiveEnabled = op.publicArchiveFallback == true and archiveCacheIo ~= nil
+   local publicArchiveMode = publicArchiveEnabled and not tokenConfigured
+   local archiveIo,archiveRoot
 
    ---------- HTTP helper (per-request client) --------
 
@@ -133,14 +139,24 @@ local function create(op)
          return code,body,responseHeader
       end
 
-      local useToken=op.token and (method ~= "GET" or readTokenEnabled) and true or false
+      local useToken=tokenConfigured and (method ~= "GET" or readTokenEnabled) and true or false
+      local responseUsedToken=useToken
       local code,body,header=perform(useToken)
       if not code then return nil,body end
       if method == "GET" and code == 401 and useToken then
          readTokenEnabled=false
+         publicArchiveMode=publicArchiveEnabled
          log(url,code,"GitHub token rejected; retrying public read without authentication")
          code,body,header=perform(false)
+         responseUsedToken=false
          if not code then return nil,body end
+      end
+      if method == "GET" and code == 403 and not responseUsedToken and publicArchiveEnabled then
+	 local meta=responseMeta(header,code)
+	 local message=string.lower(body or "")
+	 if meta.rateRemaining == 0 or sfind(message,"rate limit",1,true) then
+	    publicArchiveMode=true
+	 end
       end
       if not okStatus(code, okCodes) then
 	 local parsed
@@ -148,6 +164,94 @@ local function create(op)
 	 log(url,code,parsed and parsed.message or "")
       end
       return code, body, header
+   end
+
+   local function ensurePublicArchive()
+      if archiveIo then return true end
+      if not publicArchiveEnabled then return nil,"public archive fallback is not configured" end
+      local url=op.archiveUrl or
+	 ("https://codeload.github.com/%s/%s/zip/refs/heads/%s"):format(op.owner,op.repo,branch)
+      local httpc=hCreate()
+      local ok,err=httpc:request{
+	 url=url,
+	 method="GET",
+	 header={
+	    ["Accept"]="application/zip",
+	    ["User-Agent"]=ua,
+	 }
+      }
+      if not ok then hClose(httpc); return nil,err or "archive request failed" end
+      local body=httpc:read("a") or ""
+      local code=httpc:status()
+      hClose(httpc)
+      if code ~= 200 then return nil,"public archive HTTP "..tostring(code) end
+
+      local fp
+      fp,err=archiveCacheIo:open(archiveCachePath,"w")
+      if not fp then return nil,"cannot create public archive cache: "..tostring(err or "?") end
+      ok,err=fp:write(body)
+      local closeOk,closeErr=fp:close()
+      if not ok then return nil,"cannot write public archive cache: "..tostring(err or "?") end
+      if closeOk == nil and closeErr then return nil,"cannot close public archive cache: "..tostring(closeErr) end
+
+      local zio
+      zio,err=ba.mkio(archiveCacheIo,archiveCachePath)
+      if not zio then return nil,"cannot open public archive cache: "..tostring(err or "?") end
+      local root
+      for name,isdir in zio:files("",true) do
+	 if isdir then root=name break end
+      end
+      if not root then
+	 if zio.close then zio:close() end
+	 return nil,"public archive has no repository root"
+      end
+      archiveIo,archiveRoot=zio,root
+      log(url,code,"using public repository ZIP fallback")
+      return true
+   end
+
+   local function archivePath(name)
+      name=strip(name)
+      return name == "" and archiveRoot or archiveRoot.."/"..name
+   end
+
+   local function archiveGetMeta(name)
+      local ok,err=ensurePublicArchive()
+      if not ok then return nil,err end
+      local full=archivePath(name)
+      local st=archiveIo:stat(full)
+      if not st then return nil,"enoent" end
+      if not st.isdir then
+	 return {type="file",size=tonumber(st.size or 0),archive=true}
+      end
+      local list={archive=true}
+      for child,isdir in archiveIo:files(full,true) do
+	 if child ~= ".keep" then
+	    local childPath=full.."/"..child
+	    local childStat=archiveIo:stat(childPath)
+	    list[#list+1]={
+	       name=child,
+	       path=(strip(name) == "" and child or strip(name).."/"..child),
+	       type=isdir and "dir" or "file",
+	       size=childStat and tonumber(childStat.size or 0) or 0,
+	       archive=true,
+	    }
+	 end
+      end
+      return list
+   end
+
+   local function archiveOpen(name)
+      local ok,err=ensurePublicArchive()
+      if not ok then return nil,err end
+      local fp
+      fp,err=archiveIo:open(archivePath(name),"r")
+      if not fp then return nil,err or "enoent" end
+      local body
+      body,err=fp:read("a")
+      fp:close()
+      if body == nil then return nil,err or "noaccess" end
+      return readAPI(body)
    end
 
    -- Raw-by-path (respects branch/path protections)
@@ -169,13 +273,19 @@ local function create(op)
    end
 
    -- -------- GitHub Contents helpers --------
-   local function ghGetMeta(path, ref)
+   local function ghGetMeta(path, ref, allowArchive)
+      if allowArchive and publicArchiveMode then return archiveGetMeta(path) end
       local code, body, header = ghReq("GET", urlFor(path), nil, nil, ref and { ref = ref } or nil)
       if code == 200 then
 	 return json.decode(body)
       elseif code == 404 then
 	 return nil, "enoent"
       else
+	 if allowArchive and publicArchiveMode then
+	    local node,archiveErr=archiveGetMeta(path)
+	    if node then return node end
+	    return nil,githubError("metadata",path,code,body,header).."; public archive fallback failed: "..tostring(archiveErr)
+	 end
 	 return nil, githubError("metadata", path, code, body, header)
       end
    end
@@ -228,14 +338,14 @@ local function create(op)
       if name==lockdir then return dirMeta end
       local m=fCache[name]
       if m then return m end
-      local node, err = ghGetMeta(name, branch)
+      local node, err = ghGetMeta(name, branch, true)
       if not node then return nil, err end
       if node.type == "file" then return { mtime = mtime, size = node.size, isdir = false } end
       return dirMeta
    end
 
    local function ioFiles(name)
-      local list, err = ghGetMeta(name, branch)
+      local list, err = ghGetMeta(name, branch, true)
       if not list then return nil, err end
       if list.type == "file" then return nil, "noaccess" end
       local i = 0
@@ -339,7 +449,7 @@ local function create(op)
    end
 
    local function deletePath(path)
-      local node, err = ghGetMeta(path, branch)
+      local node, err = ghGetMeta(path, branch, false)
       if not node then return nil, err end
 
       if node.type == "file" then
@@ -368,7 +478,7 @@ local function create(op)
 	 fCache[name]=nil
 	 return true
       end
-      local node, err = ghGetMeta(name, branch)
+      local node, err = ghGetMeta(name, branch, false)
       if not node then return nil, err end
       if node.type ~= "file" then return nil, "invalidname" end
       return ghDeleteNode(name, node.sha, ("ci: delete %s"):format(name))
@@ -377,12 +487,14 @@ local function create(op)
    local function open(name, mode)
       name=strip(name)
       mode = mode or "r"
-      local node, nodeErr = ghGetMeta(name, branch)
       if mode == "r" then
 	 local m=fCache[name]
 	 if m then return readAPI(m.payload) end
+	 if publicArchiveMode then return archiveOpen(name) end
+	 local node,nodeErr=ghGetMeta(name,branch,true)
 	 if not node then return nil, nodeErr or "enoent" end
 	 if node.type ~= "file" then return nil, "enoent" end
+	 if publicArchiveMode or node.archive then return archiveOpen(name) end
 	 local content, contentErr = ghGetRawByPath(name, branch)
 	 if not content then
 	    content, contentErr = ghGetBlobRaw(node.sha, name)
@@ -390,6 +502,7 @@ local function create(op)
 	 end
 	 return readAPI(content)
       elseif mode == "w" then
+	 local node,nodeErr=ghGetMeta(name,branch,false)
 	 if cachable(name) then
 	    local t={}
 	    return {
@@ -405,6 +518,7 @@ local function create(op)
 	       end
 	    }
 	 end
+	 if not node and nodeErr ~= "enoent" then return nil,nodeErr end
 	 local currentSha = node and node.sha or nil
 	 local writeBuf = {}
 	 local function write(data) writeBuf[#writeBuf+1] = data return true end

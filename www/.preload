@@ -58,6 +58,9 @@ local ghio,info = require"GitHubIo".create{
    repo	  = "LSP-Examples",
    branch = "master",
    token=GITHUB_TOKEN,
+   publicArchiveFallback=true,
+   archiveCacheIo=ba.openio(mako and "home" or "disk"),
+   archiveCachePath="LSP-Claw-GitHub-ReadCache.zip",
    log=function(url,code,message) trace(url,code,message,debug.traceback()) end,
    mtime=os.time()
 }
