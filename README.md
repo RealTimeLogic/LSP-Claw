@@ -1,16 +1,14 @@
 # LSP-Claw Quick Start
 
 This quick start is for running LSP-Claw with the Mako Server Developer
-Edition. See the [detailed instructions](Instructions.md) for other setups,
-configuration options, lab management, backups, transfers, and tutorials.
+Edition. See the [detailed instructions](Instructions.md) for other setups, including using [Xedge standalone](https://realtimelogic.com/products/xedge/), configuration options, lab management, backups, transfers, and tutorials.
+
+![LSP-Claw](www/LSP-Claw-Icon.png "LSP-Claw")
 
 ## What You Need
 
-- An AI agent with MCP support, such as Codex, installed on your computer.
-- The [Mako Server Developer Edition](https://makoserver.net/documentation/developer-package/#makozip).
-  Running Mako as a service is preferred. The download page includes a prompt
-  you can give your AI agent to guide you through downloading, installing, and
-  running it as a service.
+- An AI agent with [MCP support](Instructions.md#what-mcp-means-here), such as Codex, installed on your computer.
+- The [Mako Server Developer Edition](https://makoserver.net/documentation/developer-package/#makozip). Running Mako as a service is preferred. The [download page](https://makoserver.net/download/overview/) includes a prompt you can give your AI agent to guide you through downloading, installing, and running it as a service.
 
 ## Connect LSP-Claw
 
