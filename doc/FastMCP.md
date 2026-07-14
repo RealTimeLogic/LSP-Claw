@@ -84,6 +84,11 @@ afterward. Invalid client input becomes a tool error with structured `field`,
 `code`, `expected`, and `received` details. Invalid output is reported as an
 `outputValidation` tool implementation error.
 
+A tool may provide `onInputError(validationError, arguments, ctx)` to translate
+an input-validation failure into an application-specific `FastMCP.error`. If
+the callback returns `nil`, FastMCP uses its normal `Invalid tool arguments`
+error. The callback does not bypass validation or invoke the tool handler.
+
 Useful result helpers are:
 
 ```lua

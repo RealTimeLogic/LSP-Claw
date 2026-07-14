@@ -128,6 +128,8 @@ function appmgr.create()
    return createLab()
 end
 
+function appmgr.name() return labn end
+
 function appmgr.getLabIo() return labIo,labIoExec end
 
 function appmgr.start()
@@ -236,6 +238,9 @@ end
 
 function appmgr.backup(name, copy)
    if not labIo then return nil,"lab not created" end
+   if backupIo:stat(name) then
+      return nil,sfmt("backup %s already exists",name),"backupAlreadyExists"
+   end
    local toIo,err=mkio(backupIo,name)
    if not toIo then return nil,err end
    return copyDir(labIo, "", toIo, copy, #bio:realpath""+1)

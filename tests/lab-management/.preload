@@ -1,0 +1,77 @@
+local x = mako or xedge
+assert(x, "Lab-management tests require Mako or Xedge")
+x.createloader(io)
+
+local FastMCP = require "fastmcp.engine"
+local appmgr = require "appmgr"
+local rw = require "rwfile"
+
+local passed = 0
+
+local function check(condition, message)
+   if not condition then error("FAIL: " .. tostring(message), 2) end
+   passed = passed + 1
+end
+
+local function equal(actual, expected, message)
+   check(actual == expected, (message or "values differ") .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
+end
+
+local function errorCode(value)
+   return FastMCP.isError(value) and value.details and value.details.code
+end
+
+assert(appmgr.create())
+equal(appmgr.name(), "lsplab", "current lab identity")
+local labIo = assert(appmgr.getLabIo())
+assert(rw.file(labIo, "existing.txt", "existing lab content"))
+
+local ghio = {}
+function ghio:stat(path)
+   if path == "example" then return { isdir=true } end
+   return nil, "not found"
+end
+
+local mcp = FastMCP.create { name="Lab management Phase 0" }
+require"lspclaw".register(mcp, ghio, {}, appmgr, {
+   io=io,
+   configurationStatus=function()
+      return { githubTokenSet=true, mcpAuthTokenSet=true, setupBaseUri="" }
+   end
+})
+
+local missing = mcp:callTool("backupLab", {})
+equal(errorCode(missing), "backupNameRequired", "backupLab requires a user-provided name")
+check(missing.details.requiresUserInput == true, "backupLab missing name requires user input")
+equal(missing.details.field, "backupName", "backupLab missing field")
+equal(missing.details.labName, "lsplab", "backupLab identifies the lab")
+
+local copyMissing = mcp:callTool("copyExampleToLab", {
+   sourcePath="example",
+   conflictAction="backupExisting",
+   confirmed=true
+})
+equal(errorCode(copyMissing), "backupNameRequired", "copyExampleToLab requires a user-provided backup name")
+check(copyMissing.details.requiresUserInput == true, "copyExampleToLab missing name requires user input")
+
+local first = mcp:callTool("backupLab", {backupName="phase0-backup",copy=true})
+check(not FastMCP.isError(first) and first.ok == true, "first named backup succeeds")
+
+local duplicate = mcp:callTool("backupLab", {backupName="phase0-backup",copy=true})
+equal(errorCode(duplicate), "backupAlreadyExists", "backupLab rejects an existing name")
+check(duplicate.details.requiresUserInput == true, "backup collision requires another user choice")
+
+local copyDuplicate = mcp:callTool("copyExampleToLab", {
+   sourcePath="example",
+   conflictAction="backupExisting",
+   backupName="phase0-backup",
+   confirmed=true
+})
+equal(errorCode(copyDuplicate), "backupAlreadyExists", "copyExampleToLab rejects an existing backup name")
+
+local backups = assert(appmgr.listBackups())
+equal(#backups, 1, "no implicit or duplicate backup directory was created")
+equal(backups[1], "phase0-backup", "only the explicit backup name exists")
+
+trace("LAB_MANAGEMENT_TEST_PASS", passed)
+if mako and mako.exit then mako.exit(0) end

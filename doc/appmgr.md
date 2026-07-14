@@ -83,6 +83,18 @@ if not ok then
 end
 ```
 
+## appmgr.name()
+
+Returns the current lab's stable storage name. During the single-lab Phase 0
+implementation this is always:
+
+```lua
+"lsplab"
+```
+
+Callers should use this accessor in user-facing errors instead of duplicating
+the literal name. A later multi-lab manager can make the result dynamic.
+
 ## appmgr.getLabIo()
 
 Returns the lab storage IO and, when available, the Xedge execution IO.
@@ -368,6 +380,13 @@ Parameters:
 
 The lab must already be created. `appmgr.create()` also initializes the backup
 base IO.
+
+The backup name must not already exist. `appmgr.backup` never overwrites or
+merges an existing backup directory. A collision returns:
+
+```lua
+nil, "backup <name> already exists", "backupAlreadyExists"
+```
 
 Examples:
 

@@ -237,6 +237,7 @@ function FastMCP:tool(name, options, handler)
       enabled = componentEnabled(self, options),
       timeoutMs = options.timeoutMs,
       authorize = options.authorize or options.auth,
+      onInputError = options.onInputError,
       handler = handler
    }
    registerComponent(self, self.tools, self.toolOrder, name, component)
@@ -378,7 +379,18 @@ function FastMCP:callTool(name, arguments, ctx)
       return FastMCP.protocolError(-32001, "Unauthorized")
    end
    local checked, validationErr = Schema.validate(tool.inputSchema, arguments or {}, { strict = self.strictSchemas })
-   if validationErr then return FastMCP.error("Invalid tool arguments", validationErr) end
+   if validationErr then
+      if type(tool.onInputError) == "function" then
+         local ok, mapped = pcall(tool.onInputError, validationErr, arguments or {}, ctx or {})
+         if not ok then
+            return FastMCP.error("Error mapping invalid tool arguments for " .. tostring(name), {
+               code = "inputErrorHandlerFailed"
+            })
+         end
+         if mapped ~= nil then return mapped end
+      end
+      return FastMCP.error("Invalid tool arguments", validationErr)
+   end
    local ok, result = pcall(tool.handler, checked, ctx or {})
    if not ok then
       return FastMCP.error("Error calling tool " .. tostring(name) .. ": " .. tostring(result), {

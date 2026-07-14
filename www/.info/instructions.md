@@ -121,6 +121,14 @@ directly with the MCP tools.
 
 ## Backup Restore
 
+- When the user asks to back up the lab without specifying an exact backup name,
+  ask what name to use before calling backupLab.
+- Never invent or infer a backup name from the date, lab name, task, or
+  conversation.
+- The same rule applies when copyExampleToLab uses conflictAction =
+  backupExisting. Ask for backupName before calling the tool.
+- If backupAlreadyExists is returned, ask for another name. Never overwrite or
+  merge an existing backup implicitly.
 - Use listLabBackups when the user asks what backups exist or wants restore.
 - Present backup choices as numbered options.
 - If the user says "Select backup 1", map 1 to choices[1].backupName.

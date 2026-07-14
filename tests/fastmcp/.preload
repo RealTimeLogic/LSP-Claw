@@ -39,6 +39,26 @@ local bad = mcp:callTool("validate", { nested={count=4}, extra=true })
 check(FastMCP.isError(bad), "invalid tool input rejected")
 equal(bad.details.code, "maximum", "validation error code")
 
+local inputErrorHandlerCalled = false
+mcp:tool("mappedInputError", {
+   inputSchema={
+      type="object",
+      properties={name={type="string"}},
+      required={"name"},
+      additionalProperties=false
+   },
+   onInputError=function(validationErr)
+      inputErrorHandlerCalled = true
+      if validationErr.code == "required" and validationErr.field == "name" then
+         return FastMCP.error("A name is required", {code="nameRequired",requiresUserInput=true})
+      end
+   end
+}, function() error("invalid input must not invoke the tool handler") end)
+local mappedInputError = mcp:callTool("mappedInputError", {})
+check(inputErrorHandlerCalled, "onInputError called")
+check(FastMCP.isError(mappedInputError) and mappedInputError.details.code == "nameRequired",
+      "onInputError maps validation failure")
+
 local optional, optionalErr = Schema.validate({
    type="object",
    properties={ optionalName={type="string"} },

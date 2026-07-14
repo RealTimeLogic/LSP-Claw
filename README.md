@@ -105,10 +105,12 @@ root:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/fastmcp/Test-FastMCP.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-management/Test-LabManagement.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-LSP-Claw.ps1
 ```
 
-The first isolates generic FastMCP. The second starts the complete LSP-Claw
+The first isolates generic FastMCP. The second tests lab-management behavior in
+an isolated temporary Mako home. The third starts the complete LSP-Claw
 application and verifies a real Streamable HTTP session.
 
 ## Running LSP-Claw

@@ -177,8 +177,43 @@ local function validatePath(path, required, label)
    return path:gsub("/+$", "")
 end
 
-local function validateBackupName(name)
-   if name == nil or name == "" then return "backup-" .. tostring(os.time()) end
+local function labName(appmgr)
+   if appmgr and type(appmgr.name) == "function" then return appmgr.name() end
+   return "lsplab"
+end
+
+local function backupNameRequiredError(appmgr)
+   return FastMCP.error("A user-provided backup name is required. Ask the user what name to use; do not invent one.", {
+      code = "backupNameRequired",
+      requiresUserInput = true,
+      field = "backupName",
+      labName = labName(appmgr),
+      nextActions = {
+         "Ask the user what backup name to use for lab " .. labName(appmgr) .. ".",
+         "Do not derive a backup name from the date, lab name, task, or conversation."
+      }
+   })
+end
+
+local function backupAlreadyExistsError(appmgr, name, err)
+   return FastMCP.error("A backup with this name already exists. Ask the user for another backup name.", {
+      code = "backupAlreadyExists",
+      requiresUserInput = true,
+      field = "backupName",
+      labName = labName(appmgr),
+      backupName = name,
+      error = err,
+      nextActions = {
+         "Tell the user that backup " .. tostring(name) .. " already exists.",
+         "Ask the user for another backup name; do not overwrite or merge the existing backup."
+      }
+   })
+end
+
+local function validateBackupName(name, appmgr)
+   if name == nil or name == "" or (type(name) == "string" and name:match("^%s*$")) then
+      return nil, backupNameRequiredError(appmgr)
+   end
    if type(name) ~= "string" then
       return nil, FastMCP.error("backupName must be a string", { code = "invalidBackupName" })
    end
@@ -186,6 +221,12 @@ local function validateBackupName(name)
       return nil, FastMCP.error("backupName must be a safe backup directory name", { code = "unsafeBackupName", backupName = name })
    end
    return name
+end
+
+local function mapBackupNameInputError(appmgr, validationErr)
+   if validationErr and validationErr.code == "required" and validationErr.field == "backupName" then
+      return backupNameRequiredError(appmgr)
+   end
 end
 
 local function ensureLab(appmgr)
@@ -734,7 +775,7 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
    end)
 
    mcp:tool("copyExampleToLab", {
-      description = "Copy the contents of a caller-selected GitHub example source directory into the lab root. The selected sourcePath directory itself is stripped.",
+      description = "Copy the contents of a caller-selected GitHub example source directory into the lab root. The selected sourcePath directory itself is stripped. If conflictAction is backupExisting, use only a backupName explicitly provided by the user; ask the user when it is missing and never invent one.",
       inputSchema = objectSchema({
 	 sourcePath = stringSchema("GitHub directory whose contents are copied into the lab root. Use AJAX/www to put index.lsp at lab root; do not use AJAX unless the lab should contain a www directory."),
 	 conflictAction = enumSchema({ "abort", "deleteExisting", "backupExisting" }, "What to do if the lab already contains files.", "abort"),
@@ -773,10 +814,13 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
 	 elseif conflictAction == "deleteExisting" then
 	    -- appmgr.copy2lab stages the source first, then replaces the lab.
 	 elseif conflictAction == "backupExisting" then
-	    local backupName, backupErr = validateBackupName(args.backupName)
+	    local backupName, backupErr = validateBackupName(args.backupName, appmgr)
 	    if not backupName then return backupErr end
-	    local ok, err = appmgr.backup(backupName, true)
-	    if not ok then return FastMCP.error("Cannot back up lab before copy", { code = "backupLabFailed", backupName = backupName, error = err }) end
+	    local ok, err, backupCode = appmgr.backup(backupName, true)
+	    if not ok then
+	       if backupCode == "backupAlreadyExists" then return backupAlreadyExistsError(appmgr, backupName, err) end
+	       return FastMCP.error("Cannot back up lab before copy", { code = "backupLabFailed", backupName = backupName, error = err })
+	    end
 	    args.backupName = backupName
 	 else
 	    return FastMCP.error("Invalid conflictAction", { code = "invalidConflictAction", conflictAction = conflictAction })
@@ -907,20 +951,26 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
    end)
 
    mcp:tool("backupLab", {
-      description = "Back up the lab using appmgr.backup. copy=false moves files out of the lab.",
+      description = "Back up the lab using a name explicitly provided by the user. If the user did not provide a name, ask before calling this tool; never invent or infer one. Existing backups are never overwritten or merged. copy=false moves files out of the lab.",
       inputSchema = objectSchema({
-	 backupName = stringSchema("Backup name under appmgr's lsplab-backup namespace."),
+	 backupName = stringSchema("Required name explicitly provided by the user under appmgr's lsplab-backup namespace. Never generate this value."),
 	 copy = boolSchema("true copies and preserves lab files; false moves files out of the lab.", true)
       }, { "backupName" }),
+      onInputError = function(validationErr)
+         return mapBackupNameInputError(appmgr, validationErr)
+      end,
       annotations = mutateAnnotations
    }, function(args)
       local runtime, runtimeErr = runtimeInfo(appmgr)
       if not runtime then return runtimeErr end
-      local backupName, backupErr = validateBackupName(args.backupName)
+      local backupName, backupErr = validateBackupName(args.backupName, appmgr)
       if not backupName then return backupErr end
       local copy = args.copy ~= false
-      local ok, err = appmgr.backup(backupName, copy)
-      if not ok then return FastMCP.error("Cannot back up lab", { code = "backupLabFailed", backupName = backupName, error = err }) end
+      local ok, err, backupCode = appmgr.backup(backupName, copy)
+      if not ok then
+         if backupCode == "backupAlreadyExists" then return backupAlreadyExistsError(appmgr, backupName, err) end
+         return FastMCP.error("Cannot back up lab", { code = "backupLabFailed", backupName = backupName, error = err })
+      end
       return result(copy and "Lab copied to backup." or "Lab moved to backup.", runtime, {
 	 backupName = backupName,
 	 copy = copy,

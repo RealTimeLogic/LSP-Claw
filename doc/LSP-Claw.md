@@ -232,6 +232,13 @@ The lab workflow is:
 9. `startLab` starts the lab app.
 10. `stopLab` stops the lab app.
 
+When the user asks to back up the lab without providing an exact name, the
+agent must ask what name to use before calling `backupLab`. It must never derive
+a name from the date, lab, task, or conversation. The same rule applies to
+`copyExampleToLab` with `conflictAction = "backupExisting"`. Existing backup
+names are rejected with `backupAlreadyExists`; they are never overwritten or
+merged implicitly.
+
 When a user wants to restore a backup but does not know the exact backup name,
 the agent should call `listLabBackups` and present the returned choices as a
 numbered list. If the user replies with a phrase such as `Select backup 1`, the
@@ -381,12 +388,16 @@ A complete MCP smoke test should verify:
 - Starting the lab and requesting `/`
 - Reading runtime trace
 - Stopping and clearing the lab
+- Requiring a user-provided backup name and rejecting backup-name collisions
 
 The latest full endpoint test used `mako -l::www`, copied `AJAX/www`, verified
 the lab contained root files such as `.config` and `index.lsp`, started the
 lab, and confirmed `GET /` returned the AJAX example page.
 
-The repeatable framework and packaged regressions are
-`tests/fastmcp/Test-FastMCP.ps1` and `tests/Test-LSP-Claw.ps1`. The packaged
-test initializes a stateful session, lists tools, calls `getRuntimeInfo`,
-checks its origin-aware browser URL, deletes the session, and stops Mako.
+The repeatable framework, lab-management, and packaged regressions are
+`tests/fastmcp/Test-FastMCP.ps1`,
+`tests/lab-management/Test-LabManagement.ps1`, and
+`tests/Test-LSP-Claw.ps1`. The lab-management test uses an isolated temporary
+Mako home. The packaged test initializes a stateful session, lists tools,
+verifies `backupNameRequired`, calls `getRuntimeInfo`, checks its origin-aware
+browser URL, deletes the session, and stops Mako.
