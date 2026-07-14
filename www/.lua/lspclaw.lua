@@ -877,14 +877,18 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo, arch
       annotations=destructiveAnnotations
    }, function(args,ctx)
       if args.confirmed ~= true then return FastMCP.error("Deleting a lab and all of its backups requires confirmation.",{code="deleteLabRequiresConfirmation",requiresConfirmation=true,labName=args.labName}) end
-      local ok,err,code=appmgr.deleteLab(args.labName)
+      local ok,err,code,routeChanged=appmgr.deleteLab(args.labName)
       if not ok then
          local existing=appmgr.getLab(args.labName)
          if code == "labBusy" and existing then return labOperationError(existing,"delete lab",err,code,"deleteLabFailed") end
          return FastMCP.error("Cannot delete lab",{code=code or "deleteLabFailed",labName=args.labName,error=err})
       end
       if sessionLabName(ctx) and lower(sessionLabName(ctx)) == lower(args.labName) then ctx.sessionState:remove("activeLabName") end
-      return result("Lab and its backups were deleted.",runtimeInfo(appmgr,ctx),{deleted=true,labName=args.labName})
+      return result("Lab and its backups were deleted.",runtimeInfo(appmgr,ctx),{
+         deleted=true,
+         labName=args.labName,
+         routeChanged=routeChanged
+      },nil,routeChanged and {"The sole remaining automatically routed lab now uses the server root."} or nil)
    end)
 
    mcp:tool("setLabBasePath", {

@@ -116,6 +116,7 @@ try {
 
    $imported = Invoke-Tool $destination $destinationSession "importLabTransfer" (Transfer-Arguments $prepared "copied-lab" $true $source.Origin)
    Assert-Equal $imported.data.imported $true "direct transfer succeeds"
+   if ($imported.data.warning) { throw "direct transfer returned cleanup warning: $($imported.data.warning)" }
    Assert-Equal $imported.data.sourceOrigin $source.Origin "result source origin"
    Assert-Equal ([IO.File]::ReadAllText((Join-Path $destinationHome "copied-lab\index.html"))) "DIRECT_TRANSFER" "transferred text"
    if (([IO.File]::ReadAllBytes((Join-Path $destinationHome "copied-lab\binary.dat")) -join ',') -ne '0,17,128,255') { throw "transferred binary differs" }

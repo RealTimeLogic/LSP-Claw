@@ -248,6 +248,9 @@ an explicitly selected route is preserved.
 
 Deletes a stopped lab, all lab files, all backups, and its registry entry.
 This is irreversible and MCP callers require explicit user confirmation.
+When this leaves one stopped lab whose name-based route was assigned
+automatically, that remaining lab returns to the root route without changing
+`basePathExplicit` to true. An explicit route is never changed.
 
 MCP session selection is handled by `lspclaw.lua`; it stores only the active
 lab name and resolves the corresponding object with `appmgr.getLab()`.

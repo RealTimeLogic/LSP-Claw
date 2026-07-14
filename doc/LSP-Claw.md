@@ -98,6 +98,9 @@ Important behavior:
   changing session selection.
 - Routes are direct (`/lab1/`, not `/labs/lab1/`) and unique. A user can change
   a stopped lab's route with `setLabBasePath` after confirmation.
+- When deletion leaves one stopped lab whose name-based route was assigned
+  automatically, `appmgr` restores its automatic root route. Explicit routes
+  are preserved.
 - `appmgr.copy2lab(io, path)` copies the contents of the selected source path
   into the lab root and strips the selected source path prefix.
 - Copying is staged outside the lab first. The lab is replaced only after all
@@ -366,6 +369,11 @@ An AI agent should present this setup URL to the human when either token is
 missing. It should explain that a missing GitHub token can cause unauthenticated
 GitHub rate limits, while a missing MCP auth token means any client that can
 reach the endpoint can use the MCP server.
+
+If GitHub returns 401 for a configured token, public GET operations retry once
+without authentication and subsequent public reads remain anonymous for that
+process. The rejection is traced so the operator can replace the token. Write
+operations continue to require the configured credential and never fall back.
 
 If no MCP auth token is set, the MCP endpoint is unauthenticated. If a token is
 set, MCP clients must provide the configured bearer token.

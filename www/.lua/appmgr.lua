@@ -216,6 +216,27 @@ local function removeAll(io)
    return nil,table.concat(errList,"\n")
 end
 
+local function removeTree(io,root)
+   local errList,dirs,ok,err={},{}
+   for path,name in recDirIter(io,root,true) do
+      if name then
+         local fname=filePath(path,name)
+         ok,err=io:remove(fname)
+         if not ok then tinsert(errList,sfmt("%s: %s",fname,err or "?")) end
+      elseif path ~= root then
+         tinsert(dirs,path)
+      end
+   end
+   for i=#dirs,1,-1 do
+      ok,err=io:rmdir(dirs[i])
+      if not ok and io:stat(dirs[i]) then tinsert(errList,sfmt("%s: %s",dirs[i],err or "?")) end
+   end
+   ok,err=io:rmdir(root)
+   if not ok and io:stat(root) then tinsert(errList,sfmt("%s: %s",root,err or "?")) end
+   if #errList == 0 then return true end
+   return nil,table.concat(errList,"\n")
+end
+
 local function stripBasePath(basePath,fname)
    if #basePath == 0 then return fname end
    if fname == basePath then return "" end
@@ -509,12 +530,13 @@ function Lab:replaceWithStage(stageIo,stageName)
       self.labIo=ba.mkio(bio,self.labn)
       return nil,sfmt("Cannot open imported lab: %s",err or "?")
    end
-   local oldIo=ba.mkio(bio,oldName)
-   local cleanupOk,cleanupErr=true
-   if oldIo then cleanupOk,cleanupErr=removeAll(oldIo) end
-   if cleanupOk then cleanupOk,cleanupErr=bio:rmdir(oldName) end
+   local cleanupOk,cleanupErr=removeTree(bio,oldName)
+   local cleanupWarning
+   if not cleanupOk then
+      cleanupWarning=sfmt("Imported lab is active, but rollback cleanup failed: %s",cleanupErr or "?")
+   end
    self:touch()
-   return true,cleanupOk and nil or sfmt("Imported lab is active, but rollback cleanup failed: %s",cleanupErr or "?")
+   return true,cleanupWarning
 end
 
 function Lab:backup(name,copy)
@@ -820,8 +842,19 @@ function appmgr.deleteLab(name)
    end
    objects[lab:name()]=nil
    indexRegistry()
+   local routeChanged
+   if #registry.labs == 1 then
+      local remaining=registry.labs[1]
+      local remainingLab=objects[remaining.name]
+      if remaining.basePathExplicit ~= true and remaining.basePath:lower() == remaining.name:lower() and
+         (not remainingLab or not remainingLab:isRunning()) then
+         routeChanged={labName=remaining.name,oldBasePath=remaining.basePath,newBasePath=""}
+         remaining.basePath=""
+         remaining.updatedAt=os.time()
+      end
+   end
    ok,err=saveRegistry()
-   if ok then return true end
+   if ok then return true,nil,nil,routeChanged end
    return nil,err
 end
 

@@ -39,6 +39,7 @@ local function create(op)
    local branch = op.branch or "main"
    local base	= api .. "/repos/" .. op.owner .. "/" .. op.repo .. "/contents/"
    local repoBase = api .. "/repos/" .. op.owner .. "/" .. op.repo
+   local readTokenEnabled = op.token and true or false
 
    ---------- HTTP helper (per-request client) --------
 
@@ -107,71 +108,63 @@ local function create(op)
    end
 
    local function ghReq(method, url, hdr, bodyStr, query, okCodes)
-      local httpc = hCreate()
-      local header = {
-	 ["Authorization"] = op.token and "Bearer " .. op.token,
-	 ["Accept"]	   = "application/vnd.github+json",
-	 ["User-Agent"]	   = ua,
-      }
-      if hdr then for k,v in pairs(hdr) do header[k] = v end end
-      local req = { url = url, method = method, header = header }
-      if query then req.query = query end
-      if bodyStr then req.size = #bodyStr end
-      local ok, err = httpc:request(req)
-      if not ok then hClose(httpc); return nil, err end
-      if bodyStr then
-	 local ok, err = httpc:write(bodyStr)
-	 if not ok then hClose(httpc); return nil, err end
+      local function perform(useToken)
+         local httpc = hCreate()
+         local header = {
+	    ["Accept"]	   = "application/vnd.github+json",
+	    ["User-Agent"] = ua,
+         }
+         if useToken then header["Authorization"]="Bearer "..op.token end
+         if hdr then for k,v in pairs(hdr) do header[k] = v end end
+         if not useToken then header["Authorization"]=nil end
+         local req = { url = url, method = method, header = header }
+         if query then req.query = query end
+         if bodyStr then req.size = #bodyStr end
+         local ok, err = httpc:request(req)
+         if not ok then hClose(httpc); return nil, err end
+         if bodyStr then
+	    ok,err=httpc:write(bodyStr)
+	    if not ok then hClose(httpc); return nil, err end
+         end
+         local body = httpc:read("a") or ""
+         local code = httpc:status()
+         local responseHeader=httpc:header()
+         hClose(httpc)
+         return code,body,responseHeader
       end
-      local body = httpc:read("a") or ""
-      local code = httpc:status()
-      local header=httpc:header()
-      hClose(httpc)
+
+      local useToken=op.token and (method ~= "GET" or readTokenEnabled) and true or false
+      local code,body,header=perform(useToken)
+      if not code then return nil,body end
+      if method == "GET" and code == 401 and useToken then
+         readTokenEnabled=false
+         log(url,code,"GitHub token rejected; retrying public read without authentication")
+         code,body,header=perform(false)
+         if not code then return nil,body end
+      end
       if not okStatus(code, okCodes) then
-	 local r=json.decode(body)
-	 log(url,code,r and r.message or "")
+	 local parsed
+	 pcall(function() parsed=json.decode(body) end)
+	 log(url,code,parsed and parsed.message or "")
       end
       return code, body, header
    end
 
    -- Raw-by-path (respects branch/path protections)
    local function ghGetRawByPath(path, ref)
-      local httpc = hCreate()
-      local ok = httpc:request{
-	 url	= urlFor(path),
-	 method = "GET",
-	 header = {
-	    ["Authorization"] = op.token and "Bearer " .. op.token,
-	    ["Accept"]	      = "application/vnd.github.raw+json",
-	    ["User-Agent"]    = ua,
-	 },
-	 query	= ref and { ref = ref } or nil,
-      }
-      if not ok then hClose(httpc); return nil, "noaccess" end
-      local body = httpc:read("a") or ""
-      local status=httpc:status()
-      local header=httpc:header()
-      hClose(httpc)
+      local status,body,header=ghReq("GET",urlFor(path),{
+	 ["Accept"]="application/vnd.github.raw+json"
+      },nil,ref and {ref=ref} or nil)
+      if not status then return nil,body or "noaccess" end
       return (status == 200) and body or nil, githubError("read raw", path, status, body, header)
    end
 
    -- Raw-by-blob SHA (great for large files too)
    local function ghGetBlobRaw(sha, path)
-      local httpc = hCreate()
-      local ok = httpc:request{
-	 url	= api .. "/repos/" .. op.owner .. "/" .. op.repo .. "/git/blobs/" .. sha,
-	 method = "GET",
-	 header = {
-	    ["Authorization"] = op.token and "Bearer " .. op.token,
-	    ["Accept"]	      = "application/vnd.github.raw+json",
-	    ["User-Agent"]    = ua,
-	 }
-      }
-      if not ok then hClose(httpc); return nil, "noaccess" end
-      local body = httpc:read("a") or ""
-      local status=httpc:status()
-      local header=httpc:header()
-      hClose(httpc)
+      local status,body,header=ghReq("GET",
+	 api.."/repos/"..op.owner.."/"..op.repo.."/git/blobs/"..sha,
+	 {["Accept"]="application/vnd.github.raw+json"})
+      if not status then return nil,body or "noaccess" end
       return (status == 200) and body or nil, githubError("read blob", path or sha, status, body, header)
    end
 

@@ -103,9 +103,16 @@ if restarting then
    check(named:metadata().basePathExplicit == true,"changed route is marked explicit")
    named=assert(appmgr.renameLab("router-renamed","router-final"))
    equal(named:basePath(),"custom-route","rename preserves an explicit route")
-   assert(appmgr.deleteLab("router-final"))
+   local deleted,_,_,routeChanged=appmgr.deleteLab("router-final")
+   assert(deleted)
+   equal(routeChanged.labName,"lsplab","deleting down to one lab reports the restored route owner")
+   equal(routeChanged.oldBasePath,"lsplab","deleting down to one lab reports the old automatic route")
+   equal(routeChanged.newBasePath,"","deleting down to one lab restores the root route")
    check(not baseIo:stat("router-final") and not baseIo:stat("router-final-backup"),"delete removes lab and backup storage")
-   equal(#assert(appmgr.listLabs()),1,"delete removes the registry entry")
+   local remaining=assert(appmgr.listLabs())
+   equal(#remaining,1,"delete removes the registry entry")
+   equal(remaining[1].basePath,"","sole automatic lab returns to root")
+   check(remaining[1].basePathExplicit == false,"restored root route remains automatic")
 
    trace("LAB_MANAGEMENT_TEST_PASS","phase=restart","checks="..passed)
    if mako and mako.exit then mako.exit(0) end

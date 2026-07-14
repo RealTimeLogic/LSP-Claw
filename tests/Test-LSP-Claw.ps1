@@ -294,6 +294,8 @@ try {
    $finalLabs = Invoke-Tool $session2 "listLabs"
    Assert-Equal $finalLabs.data.labCount 1 "one lab remains after imported labs are deleted"
    Assert-Equal $finalLabs.data.activeLabName "lab1" "single remaining lab is selected automatically"
+   Assert-Equal $finalLabs.data.labs[0].basePath "" "sole automatic lab returns to root"
+   Assert-Equal $finalLabs.data.labs[0].basePathExplicit $false "restored root route remains automatic"
 
    Close-McpSession $session1
    Close-McpSession $session2

@@ -52,8 +52,9 @@ authorization; the configured MCP token grants access to every lab.
 
 Lab URLs are direct: a lab with base path `lab1` runs at `/lab1/`, not under a
 `/labs/` prefix. The first lab initially uses `/`; when a second lab is created,
-an automatically assigned root route changes to the first lab's name. Explicit
-route choices are never changed silently.
+an automatically assigned root route changes to the first lab's name. When
+deletion leaves one stopped automatically routed lab, it returns to `/`.
+Explicit route choices are never changed silently.
 
 Complete labs can be downloaded or uploaded as ZIP archives from the
 authenticated browser setup page. AI agents can use `prepareLabExport` and
@@ -145,6 +146,18 @@ authenticated servers and verifies direct destination-pull transfer. The fifth
 starts the complete LSP-Claw application and verifies Streamable HTTP, multiple
 labs, routes, browser/MCP archives, staged replacement, and security boundaries.
 
+To test an already running root-mounted LSP-Claw instance through its registered
+HTTP MCP endpoint, including tools, resources, prompts, GitHub reads, direct
+transfer, runtime URLs, and cleanup, run:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-Registered-LSP-Claw.ps1
+```
+
+The live harness defaults to `http://localhost/mcp.lsp` and requires the sole
+baseline to be a stopped, automatically root-routed `lsplab`. Use `-Uri` to test
+another registered endpoint.
+
 ## Running LSP-Claw
 
 ### Using Mako with or without Xedge
@@ -230,6 +243,11 @@ Both tokens are optional. If no GitHub token is configured, LSP-Claw can still
 work, but GitHub access is subject to unauthenticated rate limits. If no MCP
 authentication token is configured, the MCP endpoint is reachable by any client
 that can connect to it.
+
+If GitHub rejects a configured token during a public read, LSP-Claw records the
+rejection and retries public repository reads without authentication. Replace
+the invalid token to regain authenticated rate limits. GitHub write operations
+never fall back to anonymous access.
 
 ### Mako Token Configuration
 
