@@ -133,6 +133,7 @@ root:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/fastmcp/Test-FastMCP.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-TokenSetup.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-management/Test-LabManagement.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-archive/Test-LabArchive.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-transfer/Test-LabTransfer.ps1
@@ -252,6 +253,12 @@ snapshot. The snapshot is downloaded once per server process and stored in the
 ignored runtime file `LSP-Claw-GitHub-ReadCache.zip`. Replace an invalid token
 to regain authenticated API access. GitHub write operations never use the
 public snapshot or fall back to anonymous access.
+
+The browser setup page validates every non-empty GitHub token with GitHub before
+saving it. A rejected token is marked invalid and GitHub's error is displayed
+under the field; neither token setting is changed. A successful save activates
+the validated GitHub token immediately, without restarting LSP-Claw. Leaving the
+GitHub field blank skips validation and clears the stored GitHub token.
 
 ### Mako Token Configuration
 

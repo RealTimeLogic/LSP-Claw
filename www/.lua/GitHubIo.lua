@@ -166,6 +166,47 @@ local function create(op)
       return code, body, header
    end
 
+   local function validateToken(token)
+      if type(token) ~= "string" or token == "" then return nil,"GitHub token is empty." end
+      local httpc=require("httpc").create()
+      local ok,err=httpc:request{
+	 url=api.."/user",
+	 method="GET",
+	 header={
+	    ["Authorization"]="Bearer "..token,
+	    ["Accept"]="application/vnd.github+json",
+	    ["User-Agent"]=ua,
+	 }
+      }
+      if not ok then
+	 httpc:close()
+	 return nil,"Could not contact GitHub: "..tostring(err or "request failed")
+      end
+      local body=httpc:read("a") or ""
+      local code=httpc:status()
+      httpc:close()
+      local decoded
+      pcall(function() decoded=json.decode(body) end)
+      if code == 200 then
+	 return true,{login=type(decoded) == "table" and decoded.login or nil,status=code}
+      end
+      local message=type(decoded) == "table" and decoded.message or nil
+      if not message or message == "" then message="GitHub HTTP "..tostring(code) end
+      if code == 401 then return nil,"GitHub rejected this token: "..message,{status=code} end
+      if code == 403 then
+	 return nil,"GitHub could not validate this token: "..message,{status=code}
+      end
+      return nil,"GitHub token validation failed (HTTP "..tostring(code).."): "..message,{status=code}
+   end
+
+   local function setToken(token)
+      op.token=token
+      tokenConfigured=token and token ~= "" and true or false
+      readTokenEnabled=tokenConfigured
+      publicArchiveMode=publicArchiveEnabled and not tokenConfigured
+      return true
+   end
+
    local function ensurePublicArchive()
       if archiveIo then return true end
       if not publicArchiveEnabled then return nil,"public archive fallback is not configured" end
@@ -844,6 +885,8 @@ local function create(op)
       rateLimit=rateLimit,
       archive=archive,
       commitBatch=commitBatch,
+      validateToken=validateToken,
+      setToken=setToken,
    }
 end
 

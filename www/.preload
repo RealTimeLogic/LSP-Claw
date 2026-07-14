@@ -4,29 +4,43 @@ x.createloader(io)
 
 local rw=require"rwfile"
 local GITHUB_TOKEN,MCP_AUTH_TOKEN
+local GITHUB_API=os.getenv"LSP_CLAW_GITHUB_API" or "https://api.github.com"
 
-function app.getSetTokens(githubToken,authToken)
+local function storeTokens(githubToken,authToken)
    local io=ba.openio(mako and "home" or "disk")
    local key=ba.crypto.hash"sha256"(ba.tpm.uniquekey("LSP-Claw-Keys",32))(true)
    local iv = "0123456789AB"
    local gcm=ba.crypto.symmetric("GCM",key,iv)
+   local cipher,tag = gcm:encrypt(ba.json.encode{githubToken=githubToken,authToken=authToken})
+   local ok,err=rw.file(io,"LSP-Claw-Keys.bin",tag..cipher)
+   if not ok then return nil,err or "cannot save token settings" end
+   GITHUB_TOKEN,MCP_AUTH_TOKEN=githubToken,authToken
+   if app.tokensChanged then app.tokensChanged(githubToken,authToken) end
+   return true
+end
+
+function app.getSetTokens(githubToken,authToken)
    if githubToken or authToken then
-      GITHUB_TOKEN,MCP_AUTH_TOKEN=githubToken,authToken
-      local cipher,tag = gcm:encrypt(ba.json.encode{githubToken=githubToken,authToken=authToken})
-      rw.file(io,"LSP-Claw-Keys.bin",tag..cipher)
-   else
+      local ok,err=storeTokens(githubToken,authToken)
+      if not ok then return nil,nil,err end
+   elseif GITHUB_TOKEN == nil and MCP_AUTH_TOKEN == nil then
+      local io=ba.openio(mako and "home" or "disk")
       local data=rw.file(io,"LSP-Claw-Keys.bin")
       if data then
+         local key=ba.crypto.hash"sha256"(ba.tpm.uniquekey("LSP-Claw-Keys",32))(true)
+         local gcm=ba.crypto.symmetric("GCM",key,"0123456789AB")
          local tag,cipher=data:sub(1,16),data:sub(17)
          if tag and cipher then
             local t=ba.json.decode(gcm:decrypt(cipher,tag) or "")
-            if t then
-               GITHUB_TOKEN,MCP_AUTH_TOKEN=t.githubToken,t.authToken
-            end
+            if t then GITHUB_TOKEN,MCP_AUTH_TOKEN=t.githubToken,t.authToken end
          end
       end
    end
    return GITHUB_TOKEN,MCP_AUTH_TOKEN
+end
+
+function app.saveTokens(githubToken,authToken)
+   return storeTokens(githubToken,authToken)
 end
 
 if mako then
@@ -57,6 +71,7 @@ local ghio,info = require"GitHubIo".create{
    owner  = "RealTimeLogic",
    repo	  = "LSP-Examples",
    branch = "master",
+   api=GITHUB_API,
    token=GITHUB_TOKEN,
    publicArchiveFallback=true,
    archiveCacheIo=ba.openio(mako and "home" or "disk"),
@@ -64,6 +79,14 @@ local ghio,info = require"GitHubIo".create{
    log=function(url,code,message) trace(url,code,message,debug.traceback()) end,
    mtime=os.time()
 }
+
+function app.validateGitHubToken(token)
+   return info.validateToken(token)
+end
+
+app.tokensChanged=function(githubToken)
+   info.setToken(githubToken)
+end
 
 local appmgr=require"appmgr"
 local archiveManager=require"lab_archive".create(appmgr,{

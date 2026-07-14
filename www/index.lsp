@@ -20,8 +20,9 @@ end
 
 local adminUser = "lsp-claw-admin"
 local githubToken, authToken = app.getSetTokens()
+local githubTokenInput = githubToken
 local action = request:data("action")
-local message, errorMessage
+local message, errorMessage, githubTokenError
 
 if action == "logout" then
    request:logout()
@@ -46,11 +47,25 @@ end
 if action == "save" and authorized then
    local newGithubToken = trimToNil(request:data("githubToken"))
    local newAuthToken = trimToNil(request:data("authToken"))
-   app.getSetTokens(newGithubToken, newAuthToken)
-   githubToken, authToken = app.getSetTokens()
-   authRequired = authToken ~= nil and authToken ~= ""
-   authorized = not authRequired or user == adminUser
-   message = "Token settings saved."
+   githubTokenInput = newGithubToken
+   local tokenValid,validation
+   if newGithubToken then tokenValid,validation=app.validateGitHubToken(newGithubToken) end
+   if newGithubToken and not tokenValid then
+      githubTokenError=validation or "GitHub rejected this token."
+      errorMessage="Token settings were not saved; the previous settings remain active."
+   else
+      local saved,saveErr=app.saveTokens(newGithubToken,newAuthToken)
+      if not saved then
+         errorMessage="Token settings could not be saved: "..tostring(saveErr or "unknown error")
+      else
+         githubToken, authToken = app.getSetTokens()
+         githubTokenInput = githubToken
+         authRequired = authToken ~= nil and authToken ~= ""
+         authorized = not authRequired or user == adminUser
+         local login=validation and validation.login
+         message = login and ("Token settings saved. GitHub token validated for "..login..".") or "Token settings saved."
+      end
+   end
 end
 
 
@@ -123,8 +138,11 @@ local authSet = authToken ~= nil and authToken ~= ""
                   <div class="grid">
                      <div>
                         <label for="githubToken">GitHub token</label>
-                        <input id="githubToken" name="githubToken" type="password" autocomplete="off" value="<?lsp= html(githubToken) ?>">
+                        <input id="githubToken" name="githubToken" type="password" autocomplete="off" value="<?lsp= html(githubTokenInput) ?>"<?lsp= githubTokenError and ' aria-invalid="true" aria-describedby="githubTokenError"' or "" ?>>
                         <p class="field-note">Leave blank to store no GitHub token.</p>
+                        <?lsp if githubTokenError then ?>
+                        <p class="field-error" id="githubTokenError" role="alert"><?lsp= html(githubTokenError) ?></p>
+                        <?lsp end ?>
                      </div>
                      <div>
                         <label for="authToken">MCP authentication token</label>

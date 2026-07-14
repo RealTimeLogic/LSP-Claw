@@ -215,6 +215,18 @@ input[type="checkbox"] {
    font-size: .88rem;
 }
 
+.field-error {
+   margin: 8px 0 0;
+   color: #ff8a82;
+   font-size: .88rem;
+   font-weight: 650;
+}
+
+input[aria-invalid="true"] {
+   border-color: #ff8a82;
+   box-shadow: 0 0 0 2px rgba(216, 59, 49, .22);
+}
+
 .actions {
    display: flex;
    align-items: center;

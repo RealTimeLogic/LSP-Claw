@@ -382,6 +382,14 @@ archive is downloaded once to `LSP-Claw-GitHub-ReadCache.zip`; it is a runtime
 cache and is ignored by Git. Write operations continue to require the configured
 credential and never use the public archive fallback.
 
+When an authorized user submits the browser token form, a non-empty GitHub token
+is first sent to GitHub's authenticated-user endpoint. The encrypted settings
+file and both active token values are updated only after a successful response.
+On failure, the page retains the submitted value for correction, marks the field
+invalid, displays GitHub's error, and keeps all previous settings active. A
+validated token is applied to the running `GitHubIo` immediately. A blank GitHub
+field is intentionally not validated and clears the stored GitHub token.
+
 If no MCP auth token is set, the MCP endpoint is unauthenticated. If a token is
 set, MCP clients must provide the configured bearer token.
 
