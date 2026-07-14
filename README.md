@@ -122,6 +122,9 @@ browser can be used to manually test the UI.
 
 - Download the latest pre-built LSP-Claw: [https://makoserver.net/download/packages/lsp-claw.zip](https://makoserver.net/download/packages/lsp-claw.zip)
 
+- When using Mako Server, the preferred method is the
+  [mako.zip Developer Edition](https://makoserver.net/documentation/developer-package/#makozip).
+
 - Build LSP claw:
 ``` bash
 cd www
