@@ -59,6 +59,17 @@ overwrite protections, and backup/restore semantics.
   or a failed request. Do not put bearer tokens into these URLs.
 - The browser setup page provides direct Download ZIP and Upload ZIP controls
   for transfers to and from the user's file system.
+- To copy between two configured LSP-Claw MCP servers, call
+  `prepareLabTransfer` on the source entity, then call `importLabTransfer` on
+  the destination entity with the returned descriptor. Do not read individual
+  files or relay ZIP bytes.
+- Before the destination fetch, show the exact `sourceOrigin` returned by
+  `transferSourceRequiresConfirmation` and ask the user to confirm it. Pass
+  that exact value as `confirmedSourceOrigin`; never infer confirmation.
+- The source and destination normally have different MCP bearer tokens. Never
+  copy, expose, or forward either persistent token. Relay only the short-lived
+  transfer descriptor, and do not print, log, summarize, or retain its
+  `transferTicket` after the destination call.
 
 ## Runtime Feedback
 

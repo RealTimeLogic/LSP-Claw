@@ -147,10 +147,17 @@ LSP-Claw exposes a deliberately small API.
 - `restoreLab`
 - `prepareLabExport`
 - `prepareLabImport`
+- `prepareLabTransfer`
+- `importLabTransfer`
 
 `prepareLabExport` and `prepareLabImport` return short-lived direct binary
 transfer URLs. Archive bytes are not returned by MCP. See
 [Lab-Archives.md](Lab-Archives.md).
+
+The transfer pair lets an MCP client relay only a small, short-lived snapshot
+descriptor from one independently authenticated LSP-Claw entity to another.
+The destination downloads and validates the archive directly; neither server's
+persistent MCP token is sent to the other.
 
 ### Resources
 

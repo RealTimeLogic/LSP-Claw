@@ -92,3 +92,37 @@ Exports return the archive size and SHA-256 digest. Imports return the uploaded
 digest, file count, expanded byte count, source manifest name, and final lab
 identity. These values make local automation verifiable without transferring
 the archive through MCP text.
+
+## Direct server-to-server transfer
+
+For a request such as "copy the lab from LSP-Claw-1 to LSP-Claw-2," the MCP
+client calls `prepareLabTransfer` on the source. The source creates one immutable
+stored ZIP snapshot and returns a descriptor containing a clean `transferUrl`,
+a separate 60-second `transferTicket`, exact byte count, SHA-256 digest, and
+source lab metadata. The ticket authorizes only one GET of that snapshot.
+
+The client relays the descriptor to `importLabTransfer` on the destination. The
+first unconfirmed call returns `transferSourceRequiresConfirmation` and the
+canonical source origin. Only after the user confirms that exact origin does
+the destination connect. The destination sends the capability in the
+`X-LSP-Claw-Transfer-Ticket` header, never in the URL, and never sends either
+server's MCP bearer token.
+
+The destination accepts only strict HTTP/HTTPS URLs without user-info, queries,
+fragments, malformed hosts, or invalid ports. It does not follow redirects.
+`LSP_CLAW_TRANSFER_ALLOWED_PORTS` may contain a comma-separated destination
+allowlist such as `80,443,8443`; when unset, any valid explicitly confirmed port
+is allowed. HTTPS requests require a trusted server certificate.
+
+The HTTP client uses a 5-second connect/read/write timeout and a 30-second total
+transfer limit by default. These can be changed with
+`LSP_CLAW_TRANSFER_READ_TIMEOUT_MS` and
+`LSP_CLAW_TRANSFER_TOTAL_TIMEOUT_SECONDS`. The source lifetime can be changed
+with `LSP_CLAW_TRANSFER_TTL_SECONDS`. Archive byte and expansion limits remain
+the same as local import.
+
+The source consumes a matching ticket on the first GET attempt. The destination
+requires the response length and digest headers to match the descriptor, hashes
+the downloaded bytes, rejects mismatches, then runs the normal staged archive
+validation and commit. Retry always starts with a new source snapshot and
+ticket. Ticket values must not be logged, summarized, or retained after use.

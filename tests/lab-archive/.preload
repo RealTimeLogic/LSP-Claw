@@ -3,6 +3,7 @@ assert(x,"Lab archive tests require Mako or Xedge")
 x.createloader(io)
 
 local zip=require"zip_writer"
+local archive=require"lab_archive"
 local rw=require"rwfile"
 local base=ba.openio("home") or ba.openio("disk")
 local passed=0
@@ -67,6 +68,18 @@ data,err=zip.encode({{path="changing.txt",producer=function(emit)
    emit(generation == 1 and "first" or "second")
 end}})
 check(not data and err:find("changed between reads",1,true),"changing source is rejected")
+
+local parsed=assert(archive._parseTransferUrl("https://Device.Example:8443/lsp-claw/transfer.lsp"))
+equal(parsed.origin,"https://device.example:8443","transfer origin is canonical")
+check(not archive._parseTransferUrl("ftp://device.example/transfer.lsp"),"non-HTTP transfer URL is rejected")
+check(not archive._parseTransferUrl("http://user@device.example/transfer.lsp"),"transfer URL user-info is rejected")
+check(not archive._parseTransferUrl("http://device.example/transfer.lsp?ticket=secret"),"transfer URL query is rejected")
+check(not archive._parseTransferUrl("http://device..example/transfer.lsp"),"malformed transfer host is rejected")
+check(not archive._parseTransferUrl("http://999.0.0.1/transfer.lsp"),"invalid IPv4 host is rejected")
+check(not archive._parseTransferUrl("http://[1::2::3]/transfer.lsp"),"invalid IPv6 host is rejected")
+check(archive._parseTransferUrl("http://[::1]:8080/transfer.lsp"),"valid IPv6 host is accepted")
+check(archive._secureEqual("same-ticket","same-ticket"),"constant-work ticket comparison accepts equality")
+check(not archive._secureEqual("same-ticket","other-ticket"),"constant-work ticket comparison rejects inequality")
 
 trace("LAB_ARCHIVE_TEST_PASS","checks="..passed)
 if mako and mako.exit then mako.exit(0) end

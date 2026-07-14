@@ -9,6 +9,7 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $stage = Join-Path $env:TEMP ("lsp-claw-lab-archive-test-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path (Join-Path $stage ".lua") -Force | Out-Null
 Copy-Item (Join-Path $repo "www\.lua\zip_writer.lua") (Join-Path $stage ".lua")
+Copy-Item (Join-Path $repo "www\.lua\lab_archive.lua") (Join-Path $stage ".lua")
 Copy-Item (Join-Path $PSScriptRoot ".preload") $stage
 
 $compressedPath = Join-Path $stage "compressed.zip"

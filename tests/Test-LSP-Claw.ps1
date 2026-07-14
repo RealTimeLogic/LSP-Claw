@@ -135,8 +135,8 @@ try {
    $session3 = New-McpSession
 
    $tools = (Invoke-McpRequest -Headers $session1 -Method "tools/list").result.tools
-   Assert-Equal $tools.Count 23 "Phase 3 MCP tool count"
-   foreach ($required in @("listLabs","selectLab","createLab","renameLab","deleteLab","setLabBasePath","prepareLabExport","prepareLabImport")) {
+   Assert-Equal $tools.Count 25 "Phase 4 MCP tool count"
+   foreach ($required in @("listLabs","selectLab","createLab","renameLab","deleteLab","setLabBasePath","prepareLabExport","prepareLabImport","prepareLabTransfer","importLabTransfer")) {
       if ($required -notin $tools.name) { throw "Missing lab-management tool $required" }
    }
 

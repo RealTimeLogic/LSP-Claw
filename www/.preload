@@ -63,7 +63,12 @@ local ghio,info = require"GitHubIo".create{
 }
 
 local appmgr=require"appmgr"
-local archiveManager=require"lab_archive".create(appmgr)
+local archiveManager=require"lab_archive".create(appmgr,{
+   transferTtl=tonumber(os.getenv"LSP_CLAW_TRANSFER_TTL_SECONDS"),
+   transferReadTimeoutMs=tonumber(os.getenv"LSP_CLAW_TRANSFER_READ_TIMEOUT_MS"),
+   transferTotalTimeoutSeconds=tonumber(os.getenv"LSP_CLAW_TRANSFER_TOTAL_TIMEOUT_SECONDS"),
+   allowedTransferPorts=os.getenv"LSP_CLAW_TRANSFER_ALLOWED_PORTS"
+})
 
 local mcp = require"fastmcp.engine".create {
    name = "BAS Example Workspace Assistant",
@@ -215,6 +220,10 @@ end
 
 function app.archiveService(cmd,response)
    return archiveManager:handle(cmd,response,authorizeArchiveRequest(cmd))
+end
+
+function app.transferService(cmd,response)
+   return archiveManager:handleTransfer(cmd,response)
 end
 
 function app.setRuntimeTraceBufferSize(size)

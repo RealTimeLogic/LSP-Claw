@@ -64,6 +64,12 @@ fully validated and staged; they support only creation of a new named lab or
 explicitly confirmed replacement of a stopped lab, never file merging. See
 [Lab Archives](doc/Lab-Archives.md).
 
+When the source and destination are different configured LSP-Claw MCP servers,
+the agent calls `prepareLabTransfer` on the source and `importLabTransfer` on
+the destination. The destination fetches the ZIP directly from the source
+after the user confirms the exact source origin. The two persistent MCP tokens
+remain separate and are never forwarded between servers.
+
 The following diagram illustrates how a developer can use an AI agent
 running on a local computer to develop, test, and debug software
 directly on an embedded device over the local network. The AI agent
@@ -128,14 +134,16 @@ root:
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/fastmcp/Test-FastMCP.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-management/Test-LabManagement.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-archive/Test-LabArchive.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-transfer/Test-LabTransfer.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-LSP-Claw.ps1
 ```
 
 The first isolates generic FastMCP. The second tests lab-management behavior in
 an isolated temporary Mako home. The third verifies stored ZIP generation and
-ZipIo decompression independently. The fourth starts the complete LSP-Claw
-application and verifies Streamable HTTP, multiple labs, routes, browser and
-MCP archive transfers, staged replacement, and archive security boundaries.
+ZipIo decompression independently. The fourth starts two independently
+authenticated servers and verifies direct destination-pull transfer. The fifth
+starts the complete LSP-Claw application and verifies Streamable HTTP, multiple
+labs, routes, browser/MCP archives, staged replacement, and security boundaries.
 
 ## Running LSP-Claw
 

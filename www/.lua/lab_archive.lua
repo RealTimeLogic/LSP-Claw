@@ -77,6 +77,17 @@ local function ticketId()
    return ba.b64urlencode(ba.rndbs(24))
 end
 
+local function secureEqual(a,b)
+   a,b=tostring(a or ""),tostring(b or "")
+   local length=math.max(#a,#b,32)
+   local different=(#a == #b) and 0 or 1
+   for index=1,length do
+      local av,bv=a:byte(index) or 0,b:byte(index) or 0
+      if av ~= bv then different=different+1 end
+   end
+   return different == 0
+end
+
 local Archive={}
 Archive.__index=Archive
 
@@ -213,7 +224,26 @@ function Archive:prepareExport(lab)
    end)
 end
 
-function Archive:prepareImport(labName,conflictAction,confirmed)
+function Archive:prepareTransfer(lab)
+   local prepared,err,code=self:prepareExport(lab)
+   if not prepared then return nil,err,code end
+   local ticket=self.tickets[prepared.ticket]
+   if not ticket then return nil,"prepared transfer snapshot is unavailable","prepareLabTransferFailed" end
+   ticket.kind="transfer"
+   ticket.expiresAt=os.time()+self.transferTtl
+   return {
+      transferTicket=prepared.ticket,
+      expiresAt=ticket.expiresAt,
+      expiresInSeconds=self.transferTtl,
+      expectedBytes=ticket.size,
+      digest="sha256:"..ticket.sha256,
+      sourceLab={name=lab:name(),basePath=lab:basePath()},
+      stored=true,
+      compression="none"
+   }
+end
+
+function Archive:_validateImportTarget(labName,conflictAction,confirmed)
    local valid,err=self.appmgr.validateLabName(labName)
    if not valid then return nil,err,"invalidLabName" end
    if conflictAction ~= "createNew" and conflictAction ~= "replace" then
@@ -227,6 +257,12 @@ function Archive:prepareImport(labName,conflictAction,confirmed)
       if confirmed ~= true then return nil,"replacing a lab requires explicit confirmation","labReplaceRequiresConfirmation" end
       if existing:isRunning() then return nil,"lab "..valid.." must be stopped before replacement","labMustBeStopped" end
    end
+   return valid
+end
+
+function Archive:prepareImport(labName,conflictAction,confirmed)
+   local valid,err,code=self:_validateImportTarget(labName,conflictAction,confirmed)
+   if not valid then return nil,err,code end
    local id,ticket=self:_newTicket("import",{labName=valid,conflictAction=conflictAction,confirmed=confirmed == true})
    return {ticket=id,labName=valid,conflictAction=conflictAction,expiresAt=ticket.expiresAt,expiresInSeconds=self.ticketTtl,maxUploadBytes=self.limits.maxArchiveBytes}
 end
@@ -339,9 +375,7 @@ function Archive:_saveUpload(request,id)
    return {path=path,size=size,sha256=hash(true,"hex")}
 end
 
-function Archive:_import(request,id,ticket)
-   local upload,err=self:_saveUpload(request,id)
-   if not upload then return nil,err,"uploadFailed" end
+function Archive:_importUpload(upload,ticket)
    local zipIo
    local created=false
    local lab
@@ -414,6 +448,223 @@ function Archive:_import(request,id,ticket)
    }
 end
 
+function Archive:_import(request,id,ticket)
+   local upload,err=self:_saveUpload(request,id)
+   if not upload then return nil,err,"uploadFailed" end
+   return self:_importUpload(upload,ticket)
+end
+
+local function validIpv4(host)
+   local count=0
+   for octet in host:gmatch("[^.]+") do
+      count=count+1
+      if not octet:match("^%d+$") or (#octet > 1 and octet:sub(1,1) == "0") or tonumber(octet) > 255 then return false end
+   end
+   return count == 4 and host:sub(1,1) ~= "." and host:sub(-1) ~= "." and not host:find("..",1,true)
+end
+
+local function validIpv6(host)
+   if host == "" or not host:match("^[0-9A-Fa-f:%.]+$") then return false end
+   local first=host:find("::",1,true)
+   if first and host:find("::",first+2,true) then return false end
+   local groups=0
+   local sawIpv4=false
+   for group in host:gmatch("[^:]+") do
+      if group:find(".",1,true) then
+         if sawIpv4 or not validIpv4(group) or group ~= host:match("([^:]+)$") then return false end
+         sawIpv4=true
+         groups=groups+2
+      else
+         if #group < 1 or #group > 4 or not group:match("^[0-9A-Fa-f]+$") then return false end
+         groups=groups+1
+      end
+   end
+   return first and groups < 8 or not first and groups == 8
+end
+
+local function parseTransferUrl(url)
+   if type(url) ~= "string" or #url < 1 or #url > 2048 then return nil,"transferUrl must contain 1 to 2048 characters" end
+   if url:find("[%z%c%s\\#%?]") then return nil,"transferUrl contains a forbidden character, query, or fragment" end
+   local scheme,authority,path=url:match("^(https?)://([^/]+)(/.*)$")
+   if not scheme then
+      scheme,authority=url:match("^(https?)://([^/]+)$")
+      path="/"
+   end
+   if not scheme or not authority or authority:find("@",1,true) then return nil,"transferUrl must be an HTTP or HTTPS URL without user-info" end
+   local host,port
+   if authority:sub(1,1) == "[" then
+      host,port=authority:match("^%[([0-9A-Fa-f:%.]+)%]:(%d+)$")
+      if not host then host=authority:match("^%[([0-9A-Fa-f:%.]+)%]$") end
+      if not host or not validIpv6(host) then return nil,"transferUrl has an invalid IPv6 host" end
+      host="["..host:lower().."]"
+   else
+      host,port=authority:match("^([^:]+):(%d+)$")
+      host=host or authority
+      if #host > 253 or host:find(":",1,true) or not host:match("^[A-Za-z0-9%.%-]+$") or host:sub(1,1) == "." or host:sub(-1) == "." then
+         return nil,"transferUrl has an invalid host"
+      end
+      if host:find("..",1,true) then return nil,"transferUrl has an invalid host" end
+      if host:match("^[%d%.]+$") and not validIpv4(host) then return nil,"transferUrl has an invalid IPv4 host" end
+      for label in host:gmatch("[^.]+") do
+         if #label > 63 or label:sub(1,1) == "-" or label:sub(-1) == "-" then return nil,"transferUrl has an invalid host" end
+      end
+      host=host:lower()
+   end
+   port=port and tonumber(port) or (scheme == "https" and 443 or 80)
+   if not port or port < 1 or port > 65535 then return nil,"transferUrl has an invalid port" end
+   local explicitPort=authority:match(":%d+$") ~= nil
+   local origin=scheme.."://"..host..(explicitPort and ":"..port or "")
+   return {url=url,scheme=scheme,host=host,port=port,path=path,origin=origin}
+end
+
+function Archive:_findTransferTicket(candidate)
+   local foundId,found
+   for id,ticket in pairs(self.tickets) do
+      if ticket.kind == "transfer" and secureEqual(id,candidate) then foundId,found=id,ticket end
+   end
+   return foundId,found
+end
+
+function Archive:_streamSnapshot(ticket,response)
+   local file,err=self.baseIo:open(ticket.path,"rb")
+   if not file then removeFile(self.baseIo,ticket.path) return nil,err end
+   response:setstatus(200)
+   response:setcontenttype("application/zip")
+   response:setheader("Cache-Control","no-store")
+   response:setheader("Content-Length",tostring(ticket.size))
+   response:setheader("X-LSP-Claw-SHA256",ticket.sha256)
+   local streamed,streamErr=pcall(function()
+      while true do
+         local chunk=file:read(16384)
+         if not chunk or #chunk == 0 then break end
+         response:write(chunk)
+      end
+   end)
+   pcall(function() file:close() end)
+   removeFile(self.baseIo,ticket.path)
+   if not streamed then return nil,tostring(streamErr) end
+   return true
+end
+
+function Archive:handleTransfer(request,response)
+   self:_cleanup()
+   if request:header("Authorization") then
+      jsonResponse(response,400,{ok=false,error="Persistent authorization credentials are forbidden on the transfer endpoint"})
+      return
+   end
+   local candidate=request:header("X-LSP-Claw-Transfer-Ticket")
+   local id,ticket=self:_findTransferTicket(candidate)
+   if not ticket then jsonResponse(response,404,{ok=false,error="Transfer ticket is invalid, expired, or already used",code="transferExpired"}) return end
+   self.tickets[id]=nil
+   if request:method() ~= "GET" then
+      removeFile(self.baseIo,ticket.path)
+      jsonResponse(response,405,{ok=false,error="Transfer ticket requires GET"})
+      return
+   end
+   local ok,err=self:_streamSnapshot(ticket,response)
+   if not ok then error(err) end
+end
+
+function Archive:_fetchTransfer(parsed,ticket,expectedBytes,expectedDigest)
+   local id=ticketId()
+   local path="LSP-Claw-transfer-"..id..".zip"
+   local output,err=self.baseIo:open(path,"wb")
+   if not output then return nil,err,"transferDownloadFailed" end
+   local http
+   local total,hash=0,ba.crypto.hash"sha256"
+   local failureCode="transferDownloadFailed"
+   local ok,result,code=pcall(function()
+      http=require"httpc".create{persistent=false}
+      http:timeout(self.transferReadTimeoutMs)
+      local requested,requestErr=http:request{
+         url=parsed.url,
+         method="GET",
+         trusted=parsed.scheme == "https",
+         header={
+            ["Accept"]="application/zip",
+            ["X-LSP-Claw-Transfer-Ticket"]=ticket
+         }
+      }
+      assert(requested,"source request failed: "..tostring(requestErr))
+      local status,statusErr=http:status()
+      assert(status,"source response failed: "..tostring(statusErr))
+      if status == 404 or status == 410 then failureCode="transferExpired" end
+      if status >= 300 and status < 400 then failureCode="transferRedirectForbidden" end
+      assert(status == 200,"source returned HTTP "..tostring(status).."; redirects are not allowed")
+      local contentLength=tonumber(http:header"Content-Length" or "")
+      assert(contentLength,"source response has no valid Content-Length")
+      failureCode="transferDigestMismatch"
+      assert(contentLength == expectedBytes,"source Content-Length differs from prepared descriptor")
+      assert(contentLength <= self.limits.maxArchiveBytes,"source archive exceeds size limit")
+      local sourceDigest=tostring(http:header"X-LSP-Claw-SHA256" or ""):lower()
+      assert(secureEqual(sourceDigest,expectedDigest),"source digest header differs from prepared descriptor")
+      local contentType=tostring(http:header"Content-Type" or ""):lower()
+      assert(contentType == "application/zip" or contentType:match("^application/zip%s*;"),"source response is not application/zip")
+      local started=os.time()
+      failureCode="transferDownloadFailed"
+      while true do
+         assert(os.time()-started <= self.transferTotalTimeoutSeconds,"source transfer exceeded total time limit")
+         local chunk,readErr=http:read(16384)
+         if chunk and #chunk > 0 then
+            total=total+#chunk
+            assert(total <= self.limits.maxArchiveBytes,"source archive exceeds size limit")
+            hash(chunk)
+            assert(output:write(chunk))
+         elseif readErr then
+            error("source transfer read failed: "..tostring(readErr))
+         else
+            break
+         end
+      end
+      assert(total == expectedBytes,"downloaded byte count differs from prepared descriptor")
+      local digest=hash(true,"hex"):lower()
+      failureCode="transferDigestMismatch"
+      assert(secureEqual(digest,expectedDigest),"downloaded archive digest mismatch")
+      assert(output:close())
+      output=nil
+      return {path=path,size=total,sha256=digest}
+   end)
+   if output then pcall(function() output:close() end) end
+   if http then pcall(function() http:close() end) end
+   if not ok then removeFile(self.baseIo,path) return nil,tostring(result),failureCode end
+   return result
+end
+
+function Archive:importTransfer(args)
+   args=args or {}
+   local parsed,err=parseTransferUrl(args.transferUrl)
+   if not parsed then return nil,err,"invalidTransferUrl" end
+   if self.allowedTransferPorts and not self.allowedTransferPorts[parsed.port] then
+      return nil,"source port is not allowed by this destination","invalidTransferUrl",parsed.origin
+   end
+   if args.confirmed ~= true or args.confirmedSourceOrigin ~= parsed.origin then
+      return nil,"explicit confirmation of the exact source origin is required","transferSourceRequiresConfirmation",parsed.origin
+   end
+   if type(args.transferTicket) ~= "string" or #args.transferTicket ~= 32 or not args.transferTicket:match("^[A-Za-z0-9_-]+$") then
+      return nil,"transfer ticket is invalid","invalidTransferTicket",parsed.origin
+   end
+   local expectedBytes=tonumber(args.expectedBytes)
+   if not expectedBytes or expectedBytes < 1 or expectedBytes%1 ~= 0 or expectedBytes > self.limits.maxArchiveBytes then
+      return nil,"expectedBytes is invalid","invalidTransferDescriptor",parsed.origin
+   end
+   local expectedDigest=type(args.digest) == "string" and args.digest:lower():match("^sha256:([0-9a-f]+)$")
+   if not expectedDigest or #expectedDigest ~= 64 then return nil,"digest must be a SHA-256 descriptor","invalidTransferDescriptor",parsed.origin end
+   local destination,validateErr,validateCode=self:_validateImportTarget(args.destinationLabName,args.conflictAction,args.confirmed)
+   if not destination then return nil,validateErr,validateCode,parsed.origin end
+   local upload,fetchErr,fetchCode=self:_fetchTransfer(parsed,args.transferTicket,expectedBytes,expectedDigest)
+   if not upload then return nil,fetchErr,fetchCode,parsed.origin end
+   local imported,importErr,importCode=self:_importUpload(upload,{
+      labName=destination,
+      conflictAction=args.conflictAction,
+      confirmed=args.confirmed == true
+   })
+   if not imported then return nil,importErr,importCode,parsed.origin end
+   imported.sourceOrigin=parsed.origin
+   imported.transferUrl=parsed.url
+   imported.digest="sha256:"..imported.sha256
+   return imported
+end
+
 function Archive:handle(request,response,authorized)
    self:_cleanup()
    if not authorized then jsonResponse(response,401,{ok=false,error="Unauthorized"}) return end
@@ -475,10 +726,28 @@ function M.create(appmgr,options)
       maxCompressionRatio=tonumber(options.maxCompressionRatio) or 100,
       maxManifestBytes=tonumber(options.maxManifestBytes) or 256*1024
    }
+   local allowedTransferPorts=options.allowedTransferPorts
+   if type(allowedTransferPorts) == "string" then
+      local configured={}
+      if allowedTransferPorts ~= "" then
+         for value in allowedTransferPorts:gmatch("[^,%s]+") do
+            local port=tonumber(value)
+            assert(port and port%1 == 0 and port >= 1 and port <= 65535,"invalid LSP_CLAW_TRANSFER_ALLOWED_PORTS value: "..value)
+            configured[port]=true
+         end
+         allowedTransferPorts=configured
+      else
+         allowedTransferPorts=nil
+      end
+   end
    local archive=setmetatable({
       appmgr=assert(appmgr,"appmgr is required"),
       baseIo=options.baseIo or ba.openio("home") or ba.openio("disk"),
       ticketTtl=tonumber(options.ticketTtl) or 5*60,
+      transferTtl=tonumber(options.transferTtl) or 60,
+      transferReadTimeoutMs=tonumber(options.transferReadTimeoutMs) or 5000,
+      transferTotalTimeoutSeconds=tonumber(options.transferTotalTimeoutSeconds) or 30,
+      allowedTransferPorts=allowedTransferPorts,
       limits=limits,
       tickets={}
    },Archive)
@@ -496,5 +765,7 @@ M.manifestName=manifestName
 M.format=formatName
 M.version=formatVersion
 M._safePath=safePath
+M._parseTransferUrl=parseTransferUrl
+M._secureEqual=secureEqual
 
 return M

@@ -369,6 +369,16 @@ local function archiveTicketUrl(ctx,ticket)
    return absoluteUrl(requestOrigin(ctx),path),path
 end
 
+local function transferServiceUrl(ctx)
+   local status=configurationStatusProvider and configurationStatusProvider() or {}
+   local base=tostring(status.setupBaseUri or "")
+   if base == "" then base="/" end
+   if base:sub(1,1) ~= "/" then base="/"..base end
+   if base:sub(-1) ~= "/" then base=base.."/" end
+   local path=base.."transfer.lsp"
+   return absoluteUrl(requestOrigin(ctx),path),path
+end
+
 local function configurationStatus(ctx)
    local status = {}
    if type(configurationStatusProvider) == "function" then
@@ -946,6 +956,67 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo, arch
          return result("Lab import upload prepared. POST the raw ZIP body to the short-lived URL once.",runtimeInfo(appmgr,ctx),prepared,nil,{
             "Upload the ZIP directly to uploadUrl as application/zip before it expires.",
             "Do not encode or transfer the ZIP through MCP text."
+         })
+      end)
+
+      mcp:tool("prepareLabTransfer", {
+         description="Prepare one immutable lab ZIP snapshot for direct download by another LSP-Claw server. Returns a 60-second single-use capability; relay the descriptor only to importLabTransfer on the destination and never log the transfer ticket.",
+         inputSchema=objectSchema({labName=stringSchema("Optional explicit lab override; otherwise use this session's selection.")}),
+         annotations=readAnnotations
+      }, function(args,ctx)
+         local lab,resolveErr=resolveLab(appmgr,args,ctx)
+         if not lab then return resolveErr end
+         local prepared,err,code=archiveManager:prepareTransfer(lab)
+         if not prepared then return labOperationError(lab,"prepare lab transfer",err,code,"prepareLabTransferFailed") end
+         local url,path=transferServiceUrl(ctx)
+         if not url then return FastMCP.error("Cannot determine the public transfer URL",{code="serverOriginUnavailable"}) end
+         prepared.transferUrl=url
+         prepared.transferPath=path
+         prepared.sourceOrigin=requestOrigin(ctx)
+         return result("Direct lab transfer prepared. Relay this descriptor immediately to the destination importLabTransfer tool.",runtimeInfo(appmgr,ctx,lab),prepared,nil,{
+            "Call importLabTransfer on the destination server before expiresAt.",
+            "Do not print, log, summarize, or retain transferTicket after the destination call."
+         })
+      end)
+
+      mcp:tool("importLabTransfer", {
+         description="Pull a prepared lab snapshot directly from another LSP-Claw server. Requires explicit confirmation of the exact source origin. Never forwards this server's MCP token and never follows redirects.",
+         inputSchema=objectSchema({
+            transferUrl={type="string",minLength=1,maxLength=2048,description="Exact transferUrl returned by the source prepareLabTransfer tool."},
+            transferTicket={type="string",minLength=32,maxLength=32,description="Single-use transferTicket returned by the source; never log it."},
+            expectedBytes={type="integer",minimum=1,description="Exact expectedBytes returned by the source."},
+            digest={type="string",minLength=71,maxLength=71,description="Exact sha256 digest descriptor returned by the source."},
+            destinationLabName=stringSchema("Destination lab name explicitly provided by the user."),
+            conflictAction=enumSchema({"createNew","replace"},"Create a new lab or completely replace a stopped lab."),
+            confirmed=boolSchema("True only after the user confirms the displayed source origin and any replacement.",false),
+            confirmedSourceOrigin=stringSchema("Exact source origin shown in the confirmation request, for example http://device-1.")
+         },{"transferUrl","transferTicket","expectedBytes","digest","destinationLabName","conflictAction"}),
+         annotations=destructiveAnnotations
+      }, function(args,ctx)
+         local imported,err,code,sourceOrigin=archiveManager:importTransfer(args)
+         if not imported then
+            local nextActions
+            if code == "transferSourceRequiresConfirmation" then
+               nextActions={
+                  "Show the user the exact source origin: "..tostring(sourceOrigin)..".",
+                  "Ask the user to confirm this origin and the destination action.",
+                  "Call importLabTransfer again with confirmed=true and confirmedSourceOrigin set to that exact origin."
+               }
+            end
+            return FastMCP.error("Cannot import direct lab transfer",{
+               code=code or "importLabTransferFailed",
+               sourceOrigin=sourceOrigin,
+               destinationLabName=args.destinationLabName,
+               conflictAction=args.conflictAction,
+               requiresConfirmation=code == "transferSourceRequiresConfirmation" and true or nil,
+               error=err,
+               nextActions=nextActions
+            })
+         end
+         local lab=appmgr.getLab(imported.labName)
+         if ctx and ctx.sessionState and lab then setSessionLabName(ctx,lab:name()) end
+         return result("Lab transferred directly between LSP-Claw servers.",runtimeInfo(appmgr,ctx,lab),imported,nil,{
+            "Discard the source transfer descriptor; its ticket has been consumed."
          })
       end)
    end
