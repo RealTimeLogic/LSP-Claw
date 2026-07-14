@@ -1,77 +1,193 @@
-local x = mako or xedge
-assert(x, "Lab-management tests require Mako or Xedge")
+local x=mako or xedge
+assert(x,"Lab-management tests require Mako or Xedge")
 x.createloader(io)
 
-local FastMCP = require "fastmcp.engine"
-local appmgr = require "appmgr"
-local rw = require "rwfile"
+local FastMCP=require"fastmcp.engine"
+local rw=require"rwfile"
+local baseIo=ba.openio("home") or ba.openio("disk")
+local restartMarker=".lab-management-restart"
+local restarting=baseIo:stat(restartMarker) ~= nil
+local passed=0
 
-local passed = 0
-
-local function check(condition, message)
-   if not condition then error("FAIL: " .. tostring(message), 2) end
-   passed = passed + 1
+local function check(condition,message)
+   if not condition then error("FAIL: "..tostring(message),2) end
+   passed=passed+1
 end
 
-local function equal(actual, expected, message)
-   check(actual == expected, (message or "values differ") .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
+local function equal(actual,expected,message)
+   check(actual == expected,(message or "values differ")..": expected "..tostring(expected)..", got "..tostring(actual))
 end
 
 local function errorCode(value)
    return FastMCP.isError(value) and value.details and value.details.code
 end
 
-assert(appmgr.create())
-equal(appmgr.name(), "lsplab", "current lab identity")
-local labIo = assert(appmgr.getLabIo())
-assert(rw.file(labIo, "existing.txt", "existing lab content"))
-
-local ghio = {}
-function ghio:stat(path)
-   if path == "example" then return { isdir=true } end
-   return nil, "not found"
+local function makeIo(name)
+   local st=baseIo:stat(name)
+   if not st then assert(baseIo:mkdir(name)) else check(st.isdir,name.." is a directory") end
+   return assert(ba.mkio(baseIo,name))
 end
 
-local mcp = FastMCP.create { name="Lab management Phase 0" }
-require"lspclaw".register(mcp, ghio, {}, appmgr, {
+if not restarting then
+   -- Simulate an installation that predates the registry. Migration must record
+   -- this directory without moving or changing it.
+   local legacyIo=makeIo("lsplab")
+   assert(rw.file(legacyIo,"legacy-marker.txt","legacy content"))
+   makeIo("lsplab-backup")
+   local staleStage=makeIo("lsplab-stage-stale")
+   assert(rw.file(staleStage,"partial.txt","discard me"))
+   check(not baseIo:stat("LSP-Claw-Labs.json"),"registry is absent before migration")
+end
+
+local appmgr=require"appmgr"
+
+if restarting then
+   local labs=assert(appmgr.listLabs())
+   equal(#labs,2,"registry survives process restart")
+   equal(labs[1].name,"lsplab","legacy lab remains registered")
+   equal(labs[1].basePath,"","legacy lab retains root base path")
+   check(labs[1].basePathExplicit == false,"legacy root route remains marked automatic")
+   equal(labs[2].name,"router-demo","named lab remains registered")
+   equal(labs[2].basePath,"router-demo","named lab retains its base path")
+   check(labs[2].basePathExplicit == false,"default named route remains marked automatic")
+   check(labs[1].running == false and labs[2].running == false,"running state is reset after restart")
+
+   local named=assert(appmgr.getLab("ROUTER-DEMO"))
+   equal(named:name(),"router-demo","lookup is portable and case-insensitive")
+   assert(named:create())
+   local namedIo=assert(named:getLabIo())
+   equal(assert(rw.file(namedIo,"named.txt")),"named lab content","named content survives restart")
+   local namedBackups=assert(named:listBackups())
+   equal(#namedBackups,1,"named backup registry is isolated after restart")
+   equal(namedBackups[1],"phase0-backup","named backup survives restart")
+
+   assert(appmgr.create())
+   local legacyIo=assert(appmgr.getLabIo())
+   equal(assert(rw.file(legacyIo,"legacy-marker.txt")),"legacy content","legacy content was never moved")
+   local legacyBackups=assert(appmgr.listBackups())
+   equal(#legacyBackups,1,"legacy backups remain isolated after restart")
+   equal(legacyBackups[1],"phase0-backup","legacy backup survives restart")
+
+   local registry=assert(ba.json.decode(assert(rw.file(baseIo,appmgr.registryFile()))))
+   check(registry.migration.rollbackPreserved == true,"rollback record survives restart")
+   check(registry.migration.verified == false,"migration remains explicitly unverified")
+
+   trace("LAB_MANAGEMENT_TEST_PASS","phase=restart","checks="..passed)
+   if mako and mako.exit then mako.exit(0) end
+   return
+end
+
+local migratedLabs=assert(appmgr.listLabs())
+equal(#migratedLabs,1,"legacy directory is registered")
+equal(migratedLabs[1].name,"lsplab","legacy name is preserved")
+equal(migratedLabs[1].basePath,"","legacy lab remains mounted at root")
+check(migratedLabs[1].basePathExplicit == false,"migrated root route is marked automatic")
+check(baseIo:stat("lsplab") ~= nil,"legacy directory was not moved")
+check(baseIo:stat("lsplab-backup") ~= nil,"legacy backup relationship was preserved")
+
+local registry=assert(ba.json.decode(assert(rw.file(baseIo,appmgr.registryFile()))))
+equal(registry.format,"LSP-Claw-Labs","registry format")
+equal(registry.version,1,"registry version")
+equal(registry.migration.legacyLabName,"lsplab","migration records the legacy lab")
+equal(registry.migration.legacyBackupName,"lsplab-backup","migration records the legacy backup directory")
+check(registry.migration.contentsMoved == false,"migration records that contents were not moved")
+check(registry.migration.rollbackPreserved == true,"migration preserves a rollback record")
+
+assert(appmgr.create())
+check(not baseIo:stat("lsplab-stage-stale"),"legacy stale staging directory is recovered on startup")
+equal(appmgr.name(),"lsplab","compatibility API keeps the current lab identity")
+local labIo=assert(appmgr.getLabIo())
+equal(assert(rw.file(labIo,"legacy-marker.txt")),"legacy content","legacy content is unchanged")
+assert(rw.file(labIo,"existing.txt","existing lab content"))
+
+local invalid,invalidErr,invalidCode=appmgr.createLab("../unsafe")
+check(not invalid and invalidCode == "invalidLabName","unsafe lab names are rejected")
+check(type(invalidErr) == "string","invalid lab name explains the failure")
+local reserved,_,reservedCode=appmgr.createLab("router-stage-temp")
+check(not reserved and reservedCode == "invalidLabName","staging namespace is reserved")
+local backupSuffix,_,backupSuffixCode=appmgr.createLab("router-backup")
+check(not backupSuffix and backupSuffixCode == "invalidLabName","backup namespace is reserved")
+
+local namedStale=makeIo("router-demo-stage-stale")
+assert(rw.file(namedStale,"partial.txt","discard me"))
+local named=assert(appmgr.createLab("router-demo"))
+equal(named:name(),"router-demo","named lab identity")
+equal(named:metadata().basePath,"router-demo","named lab default base path")
+check(named:metadata().basePathExplicit == false,"default named base path is marked automatic")
+check(not baseIo:stat("router-demo-stage-stale"),"named stale staging directory is recovered on creation")
+check(baseIo:stat("router-demo").isdir,"named lab uses a top-level directory")
+check(baseIo:stat("router-demo-backup").isdir,"named backups use a sibling top-level directory")
+check(not baseIo:stat("labs"),"labs are not nested under a container directory")
+
+local duplicate,_,duplicateCode=appmgr.createLab("ROUTER-DEMO")
+check(not duplicate and duplicateCode == "labAlreadyExists","lab names are unique across filesystem case rules")
+local duplicateRoot,_,duplicateRootCode=appmgr.createLab("other-root","")
+check(not duplicateRoot and duplicateRootCode == "labBasePathAlreadyExists","the root base path cannot be assigned twice")
+local duplicateRoute,_,duplicateRouteCode=appmgr.createLab("other-router","ROUTER-DEMO")
+check(not duplicateRoute and duplicateRouteCode == "labBasePathAlreadyExists","base paths are case-insensitively unique")
+local unknown,_,unknownCode=appmgr.getLab("missing-lab")
+check(not unknown and unknownCode == "unknownLab","unknown lab lookup is explicit")
+
+local namedIo=assert(named:getLabIo())
+assert(rw.file(namedIo,"named.txt","named lab content"))
+
+local ghio={}
+function ghio:stat(path)
+   if path == "example" then return {isdir=true} end
+   return nil,"not found"
+end
+
+local mcp=FastMCP.create{name="Lab management Phase 1"}
+require"lspclaw".register(mcp,ghio,{},appmgr,{
    io=io,
    configurationStatus=function()
-      return { githubTokenSet=true, mcpAuthTokenSet=true, setupBaseUri="" }
+      return {githubTokenSet=true,mcpAuthTokenSet=true,setupBaseUri=""}
    end
 })
 
-local missing = mcp:callTool("backupLab", {})
-equal(errorCode(missing), "backupNameRequired", "backupLab requires a user-provided name")
-check(missing.details.requiresUserInput == true, "backupLab missing name requires user input")
-equal(missing.details.field, "backupName", "backupLab missing field")
-equal(missing.details.labName, "lsplab", "backupLab identifies the lab")
+local missing=mcp:callTool("backupLab",{})
+equal(errorCode(missing),"backupNameRequired","backupLab requires a user-provided name")
+check(missing.details.requiresUserInput == true,"backupLab missing name requires user input")
+equal(missing.details.field,"backupName","backupLab missing field")
+equal(missing.details.labName,"lsplab","compatibility MCP tools identify the legacy lab")
 
-local copyMissing = mcp:callTool("copyExampleToLab", {
+local copyMissing=mcp:callTool("copyExampleToLab",{
    sourcePath="example",
    conflictAction="backupExisting",
    confirmed=true
 })
-equal(errorCode(copyMissing), "backupNameRequired", "copyExampleToLab requires a user-provided backup name")
-check(copyMissing.details.requiresUserInput == true, "copyExampleToLab missing name requires user input")
+equal(errorCode(copyMissing),"backupNameRequired","copyExampleToLab requires a user-provided backup name")
+check(copyMissing.details.requiresUserInput == true,"copyExampleToLab missing name requires user input")
 
-local first = mcp:callTool("backupLab", {backupName="phase0-backup",copy=true})
-check(not FastMCP.isError(first) and first.ok == true, "first named backup succeeds")
+local first=mcp:callTool("backupLab",{backupName="phase0-backup",copy=true})
+check(not FastMCP.isError(first) and first.ok == true,"first named legacy backup succeeds")
 
-local duplicate = mcp:callTool("backupLab", {backupName="phase0-backup",copy=true})
-equal(errorCode(duplicate), "backupAlreadyExists", "backupLab rejects an existing name")
-check(duplicate.details.requiresUserInput == true, "backup collision requires another user choice")
+local duplicateBackup=mcp:callTool("backupLab",{backupName="phase0-backup",copy=true})
+equal(errorCode(duplicateBackup),"backupAlreadyExists","backupLab rejects an existing name")
+check(duplicateBackup.details.requiresUserInput == true,"backup collision requires another user choice")
 
-local copyDuplicate = mcp:callTool("copyExampleToLab", {
+local copyDuplicate=mcp:callTool("copyExampleToLab",{
    sourcePath="example",
    conflictAction="backupExisting",
    backupName="phase0-backup",
    confirmed=true
 })
-equal(errorCode(copyDuplicate), "backupAlreadyExists", "copyExampleToLab rejects an existing backup name")
+equal(errorCode(copyDuplicate),"backupAlreadyExists","copyExampleToLab rejects an existing backup name")
 
-local backups = assert(appmgr.listBackups())
-equal(#backups, 1, "no implicit or duplicate backup directory was created")
-equal(backups[1], "phase0-backup", "only the explicit backup name exists")
+local legacyBackups=assert(appmgr.listBackups())
+equal(#legacyBackups,1,"legacy lab has one explicit backup")
+equal(legacyBackups[1],"phase0-backup","legacy backup name")
 
-trace("LAB_MANAGEMENT_TEST_PASS", passed)
+assert(named:backup("phase0-backup",true))
+local namedBackups=assert(named:listBackups())
+equal(#namedBackups,1,"named lab has an independent backup namespace")
+equal(namedBackups[1],"phase0-backup","the same backup name is valid in another lab")
+
+local labs=assert(appmgr.listLabs())
+equal(#labs,2,"registry contains both labs")
+equal(labs[1].name,"lsplab","registry is deterministic")
+equal(labs[2].name,"router-demo","named lab is registered")
+
+assert(rw.file(baseIo,restartMarker,"restart"))
+trace("LAB_MANAGEMENT_TEST_PASS","phase=initial","checks="..passed)
 if mako and mako.exit then mako.exit(0) end

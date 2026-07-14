@@ -43,6 +43,11 @@ MCP lets an AI agent use tools provided by another program. In this case:
 - The lab is the Lua application area that the AI agent can inspect, edit, and
   run.
 
+The storage manager can now register multiple named labs in independent
+top-level directories. The current MCP tools remain bound to the compatible
+`lsplab` workspace while session-based lab selection and per-lab URL routing
+are completed in the next implementation phase.
+
 The following diagram illustrates how a developer can use an AI agent
 running on a local computer to develop, test, and debug software
 directly on an embedded device over the local network. The AI agent

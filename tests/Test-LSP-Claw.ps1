@@ -30,6 +30,7 @@ try {
    $toolsResponse = Invoke-WebRequest -UseBasicParsing -Uri $uri -Method Post -ContentType "application/json" -Headers $headers -Body $toolsRequest
    $tools = (ConvertFrom-Json $toolsResponse.Content).result.tools
    if ($tools.Count -lt 1 -or "getRuntimeInfo" -notin $tools.name) { throw "Expected LSP-Claw tools were not listed" }
+   if ($tools.Count -ne 16) { throw "Phase 1 must preserve the 16-tool MCP surface; received $($tools.Count) tools" }
 
    $missingBackupRequest = @{jsonrpc="2.0";id=3;method="tools/call";params=@{name="backupLab";arguments=@{}}} | ConvertTo-Json -Depth 8
    $missingBackupResponse = Invoke-WebRequest -UseBasicParsing -Uri $uri -Method Post -ContentType "application/json" -Headers $headers -Body $missingBackupRequest

@@ -39,3 +39,8 @@ luac.out
 *.x86_64
 *.hex
 
+# Local LSP-Claw lab runtime data
+/lsplab/
+/lsplab-backup/
+/lsplab-stage-*/
+/LSP-Claw-Labs.json

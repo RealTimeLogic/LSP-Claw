@@ -1,23 +1,41 @@
-# appmgr API Reference
+# `appmgr` API Reference
 
 ## Overview
 
-The `appmgr` module manages the local **LSP-Claw lab app**. The lab app is
-stored in local persistent storage under:
+The `appmgr` module manages persistent **LSP-Claw lab apps**. Each lab is a
+named object with its own storage, backup storage, staging paths, running state,
+and Mako or Xedge application handle.
+
+Known labs are recorded in:
+
+```text
+LSP-Claw-Labs.json
+```
+
+Lab files are not stored in the registry. Each lab remains a top-level BAS IO
+directory. For example:
+
+```text
+lsplab/
+lsplab-backup/
+router-demo/
+router-demo-backup/
+```
+
+The module-level compatibility API continues to address the legacy lab:
 
 ```text
 lsplab
 ```
 
-Backups are stored next to it under:
-
-```text
-lsplab-backup
-```
+Consequently, existing MCP tools behave exactly as before during Phase 1.
+Session selection and MCP `labName` routing are added in Phase 2; callers that
+need named storage in Phase 1 use `appmgr.createLab()` and `appmgr.getLab()`.
 
 The module provides APIs for:
 
-- Creating the lab and backup storage areas.
+- Creating named lab and backup storage areas.
+- Persisting lab metadata and migrating an existing `lsplab` installation.
 - Reading and writing the lab through BAS IO objects.
 - Detecting whether the runtime is Mako or Xedge.
 - Starting and stopping the lab app.
@@ -31,6 +49,30 @@ Load the module with:
 local appmgr = require "appmgr"
 ```
 
+## Registry and migration
+
+The version 1 registry contains a sorted `labs` array. Each entry has:
+
+```lua
+{
+   name = "router-demo",
+   basePath = "router-demo",
+   basePathExplicit = false,
+   createdAt = 178...,
+   updatedAt = 178...,
+   running = false
+}
+```
+
+On first use, if `lsplab` exists and the registry does not, `appmgr` registers
+that directory with `basePath = ""`. It does not move or modify the lab or its
+`lsplab-backup` sibling. The registry includes an unverified migration record
+that preserves the legacy names and states that no contents were moved.
+
+Persisted `running` values are reset when the registry is loaded because an
+application from a previous process cannot still be managed by the new process.
+Stale `<lab>-stage-*` directories are removed when that lab is initialized.
+
 ## Runtime Behavior
 
 The behavior depends on the runtime environment.
@@ -41,7 +83,7 @@ The behavior depends on the runtime environment.
 | Xedge | yes | yes | yes |
 | Xedge running as a Mako app | yes | yes | yes |
 
-When running under Xedge, `appmgr.getLabIo()` returns a second IO object,
+When running under Xedge, `appmgr.getLabIo()` and `lab:getLabIo()` return a second IO object,
 `executeIo`. This IO maps to Xedge's live execution IO and can auto-execute
 `.xlua` files when the lab app is running.
 
@@ -50,7 +92,8 @@ be stored in the lab as normal files, but Mako does not auto-execute them.
 
 ## appmgr.create()
 
-Creates and initializes the lab and backup storage areas.
+Creates and initializes the legacy `lsplab` and `lsplab-backup` storage areas.
+This is the compatibility entry point used by the current MCP tools.
 
 ```lua
 local ok, err = appmgr.create()
@@ -85,19 +128,104 @@ end
 
 ## appmgr.name()
 
-Returns the current lab's stable storage name. During the single-lab Phase 0
-implementation this is always:
+Returns the compatibility API's stable storage name. During Phase 1 this is
+always:
 
 ```lua
 "lsplab"
 ```
 
 Callers should use this accessor in user-facing errors instead of duplicating
-the literal name. A later multi-lab manager can make the result dynamic.
+the literal name. Named lab objects return their own identity from `lab:name()`.
+
+## Named-lab manager API
+
+### appmgr.validateLabName(name)
+
+Validates a portable lab storage name. Names contain 1 to 64 characters, start
+with a letter or digit, and then contain only letters, digits, hyphen, and
+underscore. Names using the reserved `-backup` suffix or `-stage-` namespace
+are rejected.
+
+```lua
+local name, err = appmgr.validateLabName("router-demo")
+```
+
+### appmgr.registryFile()
+
+Returns the registry filename:
+
+```lua
+assert(appmgr.registryFile() == "LSP-Claw-Labs.json")
+```
+
+### appmgr.listLabs()
+
+Returns sorted copies of the registered lab metadata records:
+
+```lua
+local labs, err = appmgr.listLabs()
+```
+
+Changing a returned table does not change the registry. Runtime `running`
+values reflect the current process.
+
+### appmgr.createLab(name, basePath)
+
+Creates and registers a named lab and its sibling backup directory:
+
+```lua
+local lab, err, code = appmgr.createLab("router-demo")
+```
+
+When `basePath` is omitted for the first registered lab, it defaults to the
+root path `""`; for a later lab, it defaults to the lab name. Pass `""`
+explicitly to request the root URL. The registry records whether the route was
+explicitly selected so a later routing workflow never silently changes a user
+choice. A nonempty base path must be one URL-safe segment using the same
+character set as a lab name.
+
+Lab names are compared case-insensitively so the registry is portable across
+case-sensitive and case-insensitive filesystems. Duplicate names return
+`labAlreadyExists`; invalid names return `invalidLabName`. Base paths are also
+case-insensitively unique. A route collision returns
+`labBasePathAlreadyExists`.
+
+### appmgr.getLab(name)
+
+Returns an existing lab object without creating a new registry entry:
+
+```lua
+local lab, err, code = appmgr.getLab("router-demo")
+```
+
+Lookup is case-insensitive. An absent name returns `unknownLab`.
+
+### Lab object methods
+
+A named lab object owns the same operations that the compatibility module API
+performs on `lsplab`:
+
+| Method | Purpose |
+|---|---|
+| `lab:name()` | Return the stable lab name. |
+| `lab:metadata()` | Return a copy of the lab metadata. |
+| `lab:create()` | Initialize lab and backup IOs and recover stale staging directories. |
+| `lab:getLabIo()` | Return storage IO and optional Xedge execution IO. |
+| `lab:start()` / `lab:stop()` | Start or stop this lab at its registered base path. |
+| `lab:isRunning()` | Return current-process running state. |
+| `lab:backup(name, copy)` | Back up this lab under `<lab>-backup`. |
+| `lab:listBackups()` | List only this lab's backups. |
+| `lab:restore(name)` | Restore this lab from one of its backups. |
+| `lab:copy2lab(io, path)` | Stage and replace this lab from another BAS IO. |
+| `lab:rmlab()` | Remove all files from this lab. |
+
+Phase 1 deliberately does not expose named lab selection through MCP. Code
+outside the manager must not treat `appmgr.createLab()` as an MCP selection.
 
 ## appmgr.getLabIo()
 
-Returns the lab storage IO and, when available, the Xedge execution IO.
+Returns the legacy `lsplab` storage IO and, when available, its Xedge execution IO.
 
 ```lua
 local labIo, executeIo = appmgr.getLabIo()
@@ -365,7 +493,7 @@ nil, err
 
 ## appmgr.backup(name, copy)
 
-Backs up the current lab contents into a subdirectory of `lsplab-backup`.
+Backs up the compatibility lab contents into a subdirectory of `lsplab-backup`.
 
 ```lua
 local ok, err = appmgr.backup(name, copy)

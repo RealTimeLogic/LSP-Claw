@@ -79,8 +79,14 @@ agent makes those decisions by reading [catalog and example guidance](https://gi
 
 Important behavior:
 
-- The lab storage directory is `lsplab`.
-- Backups are stored under `lsplab-backup`.
+- `appmgr` persists known labs and lifecycle metadata in
+  `LSP-Claw-Labs.json`; lab file contents never enter the registry.
+- Each named lab uses a top-level storage directory and a sibling
+  `<labName>-backup` directory. Labs are not nested under a common container.
+- An existing `lsplab` installation is registered without moving its contents
+  and keeps `lsplab-backup`.
+- During Phase 1, the existing MCP tool surface continues to address `lsplab`.
+  Named lab selection and per-session routing are not exposed until Phase 2.
 - `appmgr.copy2lab(io, path)` copies the contents of the selected source path
   into the lab root and strips the selected source path prefix.
 - Copying is staged outside the lab first. The lab is replaced only after all
@@ -398,6 +404,9 @@ The repeatable framework, lab-management, and packaged regressions are
 `tests/fastmcp/Test-FastMCP.ps1`,
 `tests/lab-management/Test-LabManagement.ps1`, and
 `tests/Test-LSP-Claw.ps1`. The lab-management test uses an isolated temporary
-Mako home. The packaged test initializes a stateful session, lists tools,
+Mako home and two Mako process runs. It verifies legacy migration without a
+move, name validation, top-level per-lab storage, isolated backup namespaces,
+stale-stage recovery, registry persistence, and restart behavior. The packaged
+test initializes a stateful session, lists tools,
 verifies `backupNameRequired`, calls `getRuntimeInfo`, checks its origin-aware
 browser URL, deletes the session, and stops Mako.
