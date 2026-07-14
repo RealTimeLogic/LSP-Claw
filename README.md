@@ -140,12 +140,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-transfer/Test-LabT
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-LSP-Claw.ps1
 ```
 
-The first isolates generic FastMCP. The second tests lab-management behavior in
-an isolated temporary Mako home. The third verifies stored ZIP generation and
-ZipIo decompression independently. The fourth starts two independently
-authenticated servers and verifies direct destination-pull transfer. The fifth
-starts the complete LSP-Claw application and verifies Streamable HTTP, multiple
-labs, routes, browser/MCP archives, staged replacement, and security boundaries.
+The first isolates generic FastMCP. The second verifies the browser
+configuration page, GitHub-token validation, redirects, ZIP upload, and browser
+lab start/stop. The third tests lab-management behavior in an isolated temporary
+Mako home. The fourth verifies stored ZIP generation and ZipIo decompression
+independently. The fifth starts two independently authenticated servers and
+verifies direct destination-pull transfer. The sixth starts the complete
+LSP-Claw application and verifies Streamable HTTP, multiple labs, routes,
+browser/MCP archives, timestamps, staged replacement, and security boundaries.
 
 To test an already running root-mounted LSP-Claw instance through its registered
 HTTP MCP endpoint, including tools, resources, prompts, GitHub reads, direct
@@ -317,6 +319,14 @@ page uses that token as the login token before it shows the token form. Its lab
 list also provides a per-lab **Start lab** or **Stop lab** button, so the app
 runtime can be controlled without an AI agent.
 
+The same page provides these lab-management controls:
+
+- The lab's direct base URL and current running or stopped state.
+- **Start lab** or **Stop lab** for each named lab.
+- **Download ZIP** for exporting a complete lab to the user's file system.
+- **Upload and import ZIP** for creating a named lab or completely replacing a
+  stopped lab after explicit confirmation.
+
 Tokens saved through LSP-Claw are stored encrypted using key material derived
 from the host/device. This is the preferred method for Xedge standalone systems
 and is also useful for Mako deployments where you do not want long-lived tokens
@@ -389,6 +399,31 @@ For a remote server, use the remote URL instead:
 url = "http://192.168.1.50/mcp.lsp"
 ```
 
+### Codex with Two LSP-Claw Servers
+
+Configure each server as a separate MCP entity when Codex must transfer a lab
+between devices. The servers normally use different bearer tokens:
+
+```toml
+[mcp_servers.lsp_claw_1]
+url = "http://192.168.1.50/lsp-claw/mcp.lsp"
+enabled = true
+startup_timeout_sec = 10
+tool_timeout_sec = 60
+bearer_token_env_var = "LSP_CLAW_1_TOKEN"
+
+[mcp_servers.lsp_claw_2]
+url = "http://192.168.1.51/lsp-claw/mcp.lsp"
+enabled = true
+startup_timeout_sec = 10
+tool_timeout_sec = 60
+bearer_token_env_var = "LSP_CLAW_2_TOKEN"
+```
+
+Set each environment variable to the token configured on that server. Codex
+coordinates the transfer, but LSP-Claw never forwards either persistent token
+to the other server.
+
 Restart the AI agent after changing its config, or start a new session so it
 loads the new MCP server.
 
@@ -447,6 +482,152 @@ every second for 5 seconds, then executes it. Inspect the printed
 output and tell me what it is.
 ```
 
+## Manage Multiple Named Labs
+
+Labs isolate files, runtime state, backups, and routes. They share the server's
+MCP authentication token, so they are separate workspaces rather than separate
+security domains. Each AI session selects its own active lab.
+
+To inspect the choices without changing anything:
+
+```text
+Use LSP-Claw to list all labs on this server. Show them as a numbered list with
+their base URLs and running states. Do not select, start, stop, or modify a lab
+until I choose one.
+```
+
+To work in a specific existing lab:
+
+```text
+Use the lab named router-demo for this session. Show its status and files before
+making changes. Do not start, stop, or modify any other lab.
+```
+
+To create a new independent lab:
+
+```text
+Create a new lab named router-demo, select it for this session, and show me its
+assigned URL. Do not copy or modify files in any existing lab.
+```
+
+Lab names are unique. When only one lab exists, LSP-Claw selects it
+automatically. When multiple labs exist and the prompt does not identify one,
+the agent should list them and ask instead of guessing.
+
+Renaming or deleting a lab requires it to be stopped and requires explicit
+confirmation. Deleting a lab also deletes all of its backups.
+
+### Back Up a Lab
+
+If a backup prompt does not include an exact backup name, the agent must ask for
+one before it performs the backup. For example:
+
+```text
+Back up the lab named router-demo before I make more changes.
+```
+
+The expected next step is a question asking for the backup name. Answer with an
+exact name:
+
+```text
+Use the backup name before-router-change.
+```
+
+You can also provide everything in the first prompt:
+
+```text
+Back up the lab named router-demo as before-router-change. Do not clear or
+modify the lab after creating the backup.
+```
+
+To restore, first ask for the available choices:
+
+```text
+List the backups for the lab named router-demo as numbered choices. Do not
+restore anything yet.
+```
+
+Then select and explicitly confirm replacement of the current lab:
+
+```text
+Restore backup 1 into router-demo. I confirm that the current lab will be
+replaced by the selected backup. Leave the restored lab stopped.
+```
+
+### Change a Lab URL
+
+Changing a lab's direct base path requires the lab to be stopped and requires
+explicit confirmation:
+
+```text
+Stop the lab named router-demo and change its base path to demo. I confirm this
+route change. Then show me the new absolute application URL, but do not start
+the lab yet.
+```
+
+## Export, Import, and Transfer Complete Labs
+
+Complete-lab operations use ZIP snapshots rather than copying individual files
+through the model. LSP-Claw-generated ZIPs are stored without compression and
+preserve file timestamps. Imports accept stored or compressed ZIPs.
+
+### Download a Lab to the User's File System
+
+An agent such as Codex can use the one-time export URL to save the ZIP directly
+when it has access to the requested destination path:
+
+```text
+Download the complete lab named router-demo as a ZIP to
+C:\Users\me\Downloads\router-demo.zip. Use LSP-Claw's complete-lab export; do
+not read and copy the files individually or place ZIP bytes in the chat.
+```
+
+If the agent cannot write to the user's file system, open
+`lsp-claw-config.lsp` in a browser and click **Download ZIP** for that lab.
+
+### Import a ZIP as a New Lab
+
+The destination lab name must be provided by the user:
+
+```text
+Import C:\Users\me\Downloads\router-demo.zip into LSP-Claw as a new lab named
+router-demo-copy. Do not replace or merge with an existing lab. After import,
+show its assigned URL and leave it stopped.
+```
+
+To replace an existing lab, it must be stopped and the prompt must explicitly
+confirm complete replacement:
+
+```text
+Stop the lab named router-demo-copy, then completely replace it from
+C:\Users\me\Downloads\router-demo.zip. I confirm complete replacement of
+router-demo-copy. Do not merge old and new files.
+```
+
+### Transfer Directly Between Two LSP-Claw Servers
+
+When both servers are configured as separate MCP entities, ask the agent to use
+the direct ZIP transfer instead of relaying files:
+
+```text
+Copy the complete lab named router-demo from lsp_claw_1 to a new lab named
+router-demo-copy on lsp_claw_2. Use LSP-Claw's direct server-to-server ZIP
+transfer, not per-file copying. Show me the exact source origin reported by the
+destination and wait for my confirmation before it fetches the ZIP. Never
+forward either server's MCP bearer token.
+```
+
+The destination intentionally stops at a confirmation gate. After checking the
+reported origin, continue with a separate response such as:
+
+```text
+Yes, http://192.168.1.50 is the expected source origin. Continue the transfer.
+```
+
+The source snapshot and transfer ticket are short-lived and single-use. If the
+transfer expires or fails, the agent must prepare a new snapshot rather than
+reusing the previous ticket.
+
 ## Start from an Example
 
 When you ask the AI agent to build something with LSP-Claw, you can choose one
@@ -484,7 +665,8 @@ running lab app.
 After the AI agent recommends an example, you can continue with:
 
 ```text
-Back up the existing lab and clean the lab
+Back up the selected lab, then clean it. Ask me for the exact backup name before
+doing anything.
 ```
 
 You can also ask it to clean all files or copy new files without deleting the
