@@ -131,38 +131,7 @@ cd www
 zip -D -q -u -r -9 ../lsp-claw.zip .
 ```
 
-Before packaging a modified checkout, run both regressions from the repository
-root:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/fastmcp/Test-FastMCP.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-TokenSetup.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-management/Test-LabManagement.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-archive/Test-LabArchive.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-transfer/Test-LabTransfer.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-LSP-Claw.ps1
-```
-
-The first isolates generic FastMCP. The second verifies the browser
-configuration page, GitHub-token validation, redirects, ZIP upload, and browser
-lab start/stop. The third tests lab-management behavior in an isolated temporary
-Mako home. The fourth verifies stored ZIP generation and ZipIo decompression
-independently. The fifth starts two independently authenticated servers and
-verifies direct destination-pull transfer. The sixth starts the complete
-LSP-Claw application and verifies Streamable HTTP, multiple labs, routes,
-browser/MCP archives, timestamps, staged replacement, and security boundaries.
-
-To test an already running root-mounted LSP-Claw instance through its registered
-HTTP MCP endpoint, including tools, resources, prompts, GitHub reads, direct
-transfer, runtime URLs, and cleanup, run:
-
-```text
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-Registered-LSP-Claw.ps1
-```
-
-The live harness defaults to `http://localhost/mcp.lsp` and requires the sole
-baseline to be a stopped, automatically root-routed `lsplab`. Use `-Uri` to test
-another registered endpoint.
+The [test harnesses](doc/Windows-Test-Harnesses.md) are for Windows.
 
 ## Running LSP-Claw
 
