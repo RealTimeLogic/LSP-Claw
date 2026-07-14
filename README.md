@@ -43,10 +43,17 @@ MCP lets an AI agent use tools provided by another program. In this case:
 - The lab is the Lua application area that the AI agent can inspect, edit, and
   run.
 
-The storage manager can now register multiple named labs in independent
-top-level directories. The current MCP tools remain bound to the compatible
-`lsplab` workspace while session-based lab selection and per-lab URL routing
-are completed in the next implementation phase.
+LSP-Claw supports multiple named labs in independent top-level directories.
+Each MCP session selects its own lab, so different people or agents using the
+same server token can work in different labs. With one lab, selection is
+automatic. With multiple labs, the agent presents the available names and asks
+which one to use. Labs provide workspace and runtime isolation, not separate
+authorization; the configured MCP token grants access to every lab.
+
+Lab URLs are direct: a lab with base path `lab1` runs at `/lab1/`, not under a
+`/labs/` prefix. The first lab initially uses `/`; when a second lab is created,
+an automatically assigned root route changes to the first lab's name. Explicit
+route choices are never changed silently.
 
 The following diagram illustrates how a developer can use an AI agent
 running on a local computer to develop, test, and debug software
@@ -446,10 +453,13 @@ Tell me how to navigate to it.
 For simple tutorial-sized apps, this direct approach is often better than
 starting from a larger example.
 
-For this example, the application URL is `http://localhost/`.
+If this is the only lab and it retains the default root route, the application
+URL is `http://localhost/`. With multiple labs, use the `labApp.appUrl` returned
+by `startLab`, such as `http://localhost/lab1/`.
 
 If you are running standalone Xedge or Xedge through Mako Server, navigate to
-`http://localhost/rtl/` to open Xedge. Expand the `$lsplab` app and click
+`http://localhost/rtl/` to open Xedge. Expand the app named for the selected
+lab (for example, `$lab1`) and click
 `index.lsp` to view the code. The Xedge UI running in the browser is unaware of
 server-side changes, so refresh it to see changes made by LSP-Claw.
 

@@ -280,10 +280,39 @@ function Lab:metadata()
    return info
 end
 
+function Lab:basePath()
+   return self.info.basePath
+end
+
 function Lab:touch()
    self.info.updatedAt=os.time()
    self.info.running=self.running
    return saveRegistry()
+end
+
+function Lab:acquire(operation)
+   if self.activeOperation then
+      return nil,sfmt("lab %s is busy with %s",self.labn,self.activeOperation),"labBusy"
+   end
+   self.activeOperation=operation or "operation"
+   return true
+end
+
+function Lab:release(operation)
+   if not operation or self.activeOperation == operation then self.activeOperation=nil end
+end
+
+function Lab:busy()
+   return self.activeOperation
+end
+
+function Lab:exclusive(operation,fn)
+   local ok,err,code=self:acquire(operation)
+   if not ok then return nil,err,code end
+   local called,a,b,c,d=pcall(fn)
+   self:release(operation)
+   if not called then return nil,tostring(a),"labOperationFailed" end
+   return a,b,c,d
 end
 
 function Lab:cleanupStages()
@@ -386,7 +415,7 @@ local function copyDir(fromIo,basePath,toIo,copy,baseLen,lab)
 	 if not ok then err=sfmt("mkdir %s: %s",path,err) break end
       end
    end
-   if ok and not copy then ok,err=lab:rmlab() end
+   if ok and not copy then ok,err=removeAll(lab.labIo) end
    if ok then return true end
    return nil,err
 end
@@ -441,7 +470,7 @@ function Lab:restore(name)
    local ok
    ok,err=copyDirContents(self.backupIo,name,stageIo)
    if not ok then self:removeStage(stageIo,stageName) return nil,err end
-   ok,err=self:rmlab()
+   ok,err=removeAll(self.labIo)
    if not ok then self:removeStage(stageIo,stageName) return nil,err end
    ok,err=copyDirContents(stageIo,"",self.labIo)
    self:removeStage(stageIo,stageName)
@@ -460,13 +489,23 @@ function Lab:copy2lab(sourceIo,path)
    local ok
    ok,err=copyDirContents(sourceIo,path,stageIo)
    if not ok then self:removeStage(stageIo,stageName) return nil,err end
-   ok,err=self:rmlab()
+   ok,err=removeAll(self.labIo)
    if not ok then self:removeStage(stageIo,stageName) return nil,err end
    ok,err=copyDirContents(stageIo,"",self.labIo)
    self:removeStage(stageIo,stageName)
    if ok then self:touch() end
    return ok,err
 end
+
+local function guardLabMethod(name)
+   local implementation=Lab[name]
+   Lab[name]=function(self,...)
+      local a,b,c,d=...
+      return self:exclusive(name,function() return implementation(self,a,b,c,d) end)
+   end
+end
+
+for _,name in ipairs{"start","stop","rmlab","backup","restore","copy2lab"} do guardLabMethod(name) end
 
 local objects={}
 
@@ -568,7 +607,131 @@ function appmgr.createLab(name,basePath)
    return addLab(name,basePath)
 end
 
--- Compatibility API: existing MCP tools continue to operate on lsplab in Phase 1.
+local function routeOwner(basePath,exceptInfo)
+   local key=basePath:lower()
+   for _,info in ipairs(registry.labs) do
+      if info ~= exceptInfo and info.basePath:lower() == key then return info end
+   end
+end
+
+function appmgr.setLabBasePath(name,basePath,basePathExplicit)
+   local lab,err,code=getLab(name)
+   if not lab then return nil,err,code end
+   if lab:isRunning() then return nil,"lab "..lab:name().." must be stopped before changing its base path","labMustBeStopped" end
+   local normalized
+   normalized,err=validateBasePath(basePath)
+   if not normalized then return nil,err,"invalidLabBasePath" end
+   local owner=routeOwner(normalized,lab.info)
+   if owner then return nil,"base path "..normalized.." is already used by lab "..owner.name,"labBasePathAlreadyExists" end
+   local oldPath,oldExplicit=lab.info.basePath,lab.info.basePathExplicit
+   lab.info.basePath=normalized
+   lab.info.basePathExplicit=basePathExplicit ~= false
+   lab.info.updatedAt=os.time()
+   local ok
+   ok,err=saveRegistry()
+   if ok then return lab end
+   lab.info.basePath,lab.info.basePathExplicit=oldPath,oldExplicit
+   return nil,err
+end
+
+function appmgr.renameLab(name,newName)
+   local lab,err,code=getLab(name)
+   if not lab then return nil,err,code end
+   if lab:isRunning() then return nil,"lab "..lab:name().." must be stopped before it is renamed","labMustBeStopped" end
+   newName,err=validateLabName(newName)
+   if not newName then return nil,err,"invalidLabName" end
+   if labsByKey[newName:lower()] then return nil,"lab "..newName.." already exists","labAlreadyExists" end
+   local ok
+   ok,err=lab:create()
+   if not ok then return nil,err end
+
+   local oldName,oldBackup=lab.labn,lab.backupn
+   local newBackup=newName.."-backup"
+   local oldPath=lab.info.basePath
+   local newPath=oldPath
+   if not lab.info.basePathExplicit and oldPath:lower() == oldName:lower() then newPath=newName end
+   local owner=routeOwner(newPath,lab.info)
+   if owner then return nil,"base path "..newPath.." is already used by lab "..owner.name,"labBasePathAlreadyExists" end
+
+   ok,err=bio:rename(oldBackup,newBackup)
+   if not ok then return nil,sfmt("Cannot rename %s to %s: %s",oldBackup,newBackup,err or "?") end
+   ok,err=bio:rename(oldName,newName)
+   if not ok then
+      bio:rename(newBackup,oldBackup)
+      return nil,sfmt("Cannot rename %s to %s: %s",oldName,newName,err or "?")
+   end
+
+   local info=lab.info
+   info.name=newName
+   info.basePath=newPath
+   info.updatedAt=os.time()
+   lab.labn=newName
+   lab.backupn=newBackup
+   lab.labIo=ba.mkio(bio,newName)
+   lab.backupIo=ba.mkio(bio,newBackup)
+   lab.labIoExec=makeExecuteIo(newName)
+   objects[oldName]=nil
+   objects[newName]=lab
+   indexRegistry()
+   ok,err=saveRegistry()
+   if ok then return lab end
+
+   bio:rename(newName,oldName)
+   bio:rename(newBackup,oldBackup)
+   info.name=oldName
+   info.basePath=oldPath
+   lab.labn=oldName
+   lab.backupn=oldBackup
+   lab.labIo=ba.mkio(bio,oldName)
+   lab.backupIo=ba.mkio(bio,oldBackup)
+   lab.labIoExec=makeExecuteIo(oldName)
+   objects[newName]=nil
+   objects[oldName]=lab
+   indexRegistry()
+   return nil,err
+end
+
+function appmgr.deleteLab(name)
+   local lab,err,code=getLab(name)
+   if not lab then return nil,err,code end
+   if lab:isRunning() then return nil,"lab "..lab:name().." must be stopped before it is deleted","labMustBeStopped" end
+   local ok
+   ok,err=lab:create()
+   if not ok then return nil,err end
+   ok,err=removeAll(lab.labIo)
+   if not ok then return nil,err end
+   ok,err=removeAll(lab.backupIo)
+   if not ok then return nil,err end
+   ok,err=bio:rmdir(lab.labn)
+   if not ok then return nil,sfmt("Cannot remove lab directory %s: %s",lab.labn,err or "?") end
+   ok,err=bio:rmdir(lab.backupn)
+   if not ok then return nil,sfmt("Cannot remove backup directory %s: %s",lab.backupn,err or "?") end
+   for i,info in ipairs(registry.labs) do
+      if info == lab.info then table.remove(registry.labs,i) break end
+   end
+   if registry.migration and registry.migration.legacyLabName == lab:name() then
+      registry.migration.legacyDeletedAt=os.time()
+   end
+   objects[lab:name()]=nil
+   indexRegistry()
+   ok,err=saveRegistry()
+   if ok then return true end
+   return nil,err
+end
+
+local function guardManagerLabMethod(name)
+   local implementation=appmgr[name]
+   appmgr[name]=function(labName,...)
+      local lab,err,code=getLab(labName)
+      if not lab then return nil,err,code end
+      local a,b,c,d=...
+      return lab:exclusive(name,function() return implementation(labName,a,b,c,d) end)
+   end
+end
+
+for _,name in ipairs{"setLabBasePath","renameLab","deleteLab"} do guardManagerLabMethod(name) end
+
+-- Compatibility API: existing callers may continue to operate on lsplab.
 function appmgr.create()
    local lab,err=defaultLab(true)
    if not lab then return nil,err end

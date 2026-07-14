@@ -135,6 +135,17 @@ local transport = Http.streamable(mcp, {
 })
 local s1 = assert(transport:createSession("2025-11-25", {}))
 local s2 = assert(transport:createSession("2025-11-25", {}))
+local state = Http._makeSessionState(s1)
+check(state:get("activeLabName") == nil, "session state starts empty")
+check(state:set("activeLabName", "lab1"), "session state accepts scalar identifiers")
+equal(state:get("activeLabName"), "lab1", "session state returns stored identifier")
+check(not state:set("object", {}), "session state rejects runtime objects")
+check(not state:set("large", string.rep("x", 1025)), "session state bounds string values")
+for i=1,31 do check(state:set("key"..i,i), "session state accepts bounded key "..i) end
+check(not state:set("key32",32), "session state enforces key capacity")
+check(state:set("activeLabName","lab2"), "session state permits updates at capacity")
+check(state:remove("activeLabName"), "session state removes values")
+check(state:set("key32",32), "removed session state capacity is reusable")
 local s3, capacityErr = transport:createSession("2025-11-25", {})
 check(s3 == nil and capacityErr, "session capacity enforced")
 now = 110

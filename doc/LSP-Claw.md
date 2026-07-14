@@ -85,8 +85,14 @@ Important behavior:
   `<labName>-backup` directory. Labs are not nested under a common container.
 - An existing `lsplab` installation is registered without moving its contents
   and keeps `lsplab-backup`.
-- During Phase 1, the existing MCP tool surface continues to address `lsplab`.
-  Named lab selection and per-session routing are not exposed until Phase 2.
+- Each stateful MCP session stores only its selected lab name. Lab objects and
+  contents remain in `appmgr`, not in the FastMCP session.
+- With one lab, selection is automatic. With multiple labs, lab-bound tools
+  return `labSelectionRequired` until the user chooses with `selectLab`.
+- Lab-bound tools accept an optional `labName` override for one call without
+  changing session selection.
+- Routes are direct (`/lab1/`, not `/labs/lab1/`) and unique. A user can change
+  a stopped lab's route with `setLabBasePath` after confirmation.
 - `appmgr.copy2lab(io, path)` copies the contents of the selected source path
   into the lab root and strips the selected source path prefix.
 - Copying is staged outside the lab first. The lab is replaced only after all
@@ -116,7 +122,12 @@ LSP-Claw exposes a deliberately small API.
 - `getRuntimeInfo`
 - `readRuntimeTrace`
 - `getLabStatus`
+- `listLabs`
+- `selectLab`
 - `createLab`
+- `renameLab`
+- `deleteLab`
+- `setLabBasePath`
 - `startLab`
 - `stopLab`
 - `getExampleCatalog`
@@ -223,20 +234,21 @@ error preserves the upstream GitHub HTTP status and message where available.
 
 ## Lab Design
 
-The lab is the only writable application area exposed to the AI agent.
+Named labs are the writable application areas exposed to the AI agent.
 
 The lab workflow is:
 
-1. `createLab` initializes lab storage.
-2. `listLabFiles` and `readLabFile` inspect current lab files.
-3. `writeLabFile` creates or updates lab files.
-4. `copyExampleToLab` copies a selected example app root into the lab.
-5. `backupLab` preserves lab state.
-6. `listLabBackups` lists backup directories with numbered choices.
-7. `restoreLab` restores a selected backup after explicit confirmation.
-8. `clearLab` removes lab state after explicit confirmation.
-9. `startLab` starts the lab app.
-10. `stopLab` stops the lab app.
+1. `listLabs` discovers labs; `selectLab` chooses one for the MCP session.
+2. `createLab` creates a user-named lab when none exists or another is needed.
+3. `listLabFiles` and `readLabFile` inspect current lab files.
+4. `writeLabFile` creates or updates lab files.
+5. `copyExampleToLab` copies a selected example app root into the lab.
+6. `backupLab` preserves lab state.
+7. `listLabBackups` lists backup directories with numbered choices.
+8. `restoreLab` restores a selected backup after explicit confirmation.
+9. `clearLab` removes lab state after explicit confirmation.
+10. `startLab` starts the lab app at its unique direct base path.
+11. `stopLab` stops the lab app.
 
 When the user asks to back up the lab without providing an exact name, the
 agent must ask what name to use before calling `backupLab`. It must never derive
@@ -250,6 +262,10 @@ the agent should call `listLabBackups` and present the returned choices as a
 numbered list. If the user replies with a phrase such as `Select backup 1`, the
 agent maps the number to `choices[1].backupName` and then calls `restoreLab`
 with that exact backup name after confirmation.
+
+The runtime trace is server-global. `readRuntimeTrace` reports
+`labAttributionReliable = false`; selection does not filter ordinary BAS trace
+messages by lab.
 
 The AI agent must not assume local filesystem access to the server. It should
 use MCP lab tools as the authority for lab state.
@@ -357,7 +373,8 @@ environment.
 
 The agent should:
 
-- Check runtime and lab status first.
+- Check runtime and call `listLabs` first; select a lab before requesting its
+  status when multiple choices exist.
 - Use the catalog to choose examples.
 - Read the selected example's `AGENTS.md`.
 - Choose explicit source paths when copying.
@@ -386,19 +403,15 @@ A complete MCP smoke test should verify:
 - `resources/list`
 - `resources/templates/list`
 - `prompts/list`
-- All four resources with `resources/read`
-- All three prompts with `prompts/get`
-- All 14 tools
-- Copying an example such as `AJAX/www`
-- Confirming copied files are lab-root paths, not wrapped by `AJAX/` or `www/`
-- Starting the lab and requesting `/`
-- Reading runtime trace
-- Stopping and clearing the lab
-- Requiring a user-provided backup name and rejecting backup-name collisions
-
-The latest full endpoint test used `mako -l::www`, copied `AJAX/www`, verified
-the lab contained root files such as `.config` and `index.lsp`, started the
-lab, and confirmed `GET /` returned the AJAX example page.
+- The 21-tool surface, all resources, and all prompts
+- Zero-lab `labCreationRequired` behavior
+- Automatic single-lab selection and explicit multiple-lab selection
+- Isolation between at least two stateful MCP sessions
+- One-call `labName` overrides that do not change session selection
+- Two simultaneous labs serving different content at distinct direct routes
+- Rename, base-path change, delete, and session-selection cleanup
+- Server-global trace metadata
+- Required user-provided backup names and backup-name collisions
 
 The repeatable framework, lab-management, and packaged regressions are
 `tests/fastmcp/Test-FastMCP.ps1`,
@@ -406,7 +419,9 @@ The repeatable framework, lab-management, and packaged regressions are
 `tests/Test-LSP-Claw.ps1`. The lab-management test uses an isolated temporary
 Mako home and two Mako process runs. It verifies legacy migration without a
 move, name validation, top-level per-lab storage, isolated backup namespaces,
-stale-stage recovery, registry persistence, and restart behavior. The packaged
-test initializes a stateful session, lists tools,
-verifies `backupNameRequired`, calls `getRuntimeInfo`, checks its origin-aware
-browser URL, deletes the session, and stops Mako.
+stale-stage recovery, registry persistence, lifecycle locks, rename/delete,
+and restart behavior. The packaged test uses three stateful sessions and two
+labs to verify selection isolation, explicit overrides, direct runtime routes,
+session cleanup, and the 21-tool MCP surface. It also
+verifies `backupNameRequired`, origin-aware lab URLs, actual HTTP content at
+both lab routes, session deletion, and Mako process cleanup.

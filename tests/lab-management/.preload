@@ -61,6 +61,14 @@ if restarting then
    equal(#namedBackups,1,"named backup registry is isolated after restart")
    equal(namedBackups[1],"phase0-backup","named backup survives restart")
 
+   assert(named:acquire("held-by-test"))
+   local busyBackup,_,busyBackupCode=named:backup("must-not-exist",true)
+   check(not busyBackup and busyBackupCode == "labBusy","conflicting lab mutation returns labBusy")
+   local busyRename,_,busyRenameCode=appmgr.renameLab("router-demo","must-not-exist")
+   check(not busyRename and busyRenameCode == "labBusy","manager lifecycle mutation shares the lab lock")
+   named:release("held-by-test")
+   check(named:busy() == nil,"lab lock is released")
+
    assert(appmgr.create())
    local legacyIo=assert(appmgr.getLabIo())
    equal(assert(rw.file(legacyIo,"legacy-marker.txt")),"legacy content","legacy content was never moved")
@@ -71,6 +79,33 @@ if restarting then
    local registry=assert(ba.json.decode(assert(rw.file(baseIo,appmgr.registryFile()))))
    check(registry.migration.rollbackPreserved == true,"rollback record survives restart")
    check(registry.migration.verified == false,"migration remains explicitly unverified")
+
+   assert(named:start())
+   check(named:isRunning(),"named lab starts at its registered route")
+   local runningRoute,_,runningRouteCode=appmgr.setLabBasePath("router-demo","custom-route")
+   check(not runningRoute and runningRouteCode == "labMustBeStopped","running lab route cannot change")
+   local runningRename,_,runningRenameCode=appmgr.renameLab("router-demo","router-renamed")
+   check(not runningRename and runningRenameCode == "labMustBeStopped","running lab cannot be renamed")
+   local runningDelete,_,runningDeleteCode=appmgr.deleteLab("router-demo")
+   check(not runningDelete and runningDeleteCode == "labMustBeStopped","running lab cannot be deleted")
+   assert(named:stop())
+
+   named=assert(appmgr.renameLab("router-demo","router-renamed"))
+   equal(named:name(),"router-renamed","stopped lab is renamed")
+   equal(named:basePath(),"router-renamed","automatic route follows a renamed lab")
+   check(not baseIo:stat("router-demo") and not baseIo:stat("router-demo-backup"),"old storage names are removed")
+   check(baseIo:stat("router-renamed").isdir and baseIo:stat("router-renamed-backup").isdir,"lab and backup storage are renamed together")
+   equal(assert(rw.file(assert(named:getLabIo()),"named.txt")),"named lab content","rename preserves lab content")
+   equal(assert(named:listBackups())[1],"phase0-backup","rename preserves backups")
+
+   named=assert(appmgr.setLabBasePath("router-renamed","custom-route"))
+   equal(named:basePath(),"custom-route","stopped lab route changes explicitly")
+   check(named:metadata().basePathExplicit == true,"changed route is marked explicit")
+   named=assert(appmgr.renameLab("router-renamed","router-final"))
+   equal(named:basePath(),"custom-route","rename preserves an explicit route")
+   assert(appmgr.deleteLab("router-final"))
+   check(not baseIo:stat("router-final") and not baseIo:stat("router-final-backup"),"delete removes lab and backup storage")
+   equal(#assert(appmgr.listLabs()),1,"delete removes the registry entry")
 
    trace("LAB_MANAGEMENT_TEST_PASS","phase=restart","checks="..passed)
    if mako and mako.exit then mako.exit(0) end
@@ -145,7 +180,7 @@ require"lspclaw".register(mcp,ghio,{},appmgr,{
    end
 })
 
-local missing=mcp:callTool("backupLab",{})
+local missing=mcp:callTool("backupLab",{labName="lsplab"})
 equal(errorCode(missing),"backupNameRequired","backupLab requires a user-provided name")
 check(missing.details.requiresUserInput == true,"backupLab missing name requires user input")
 equal(missing.details.field,"backupName","backupLab missing field")
@@ -153,21 +188,23 @@ equal(missing.details.labName,"lsplab","compatibility MCP tools identify the leg
 
 local copyMissing=mcp:callTool("copyExampleToLab",{
    sourcePath="example",
+   labName="lsplab",
    conflictAction="backupExisting",
    confirmed=true
 })
 equal(errorCode(copyMissing),"backupNameRequired","copyExampleToLab requires a user-provided backup name")
 check(copyMissing.details.requiresUserInput == true,"copyExampleToLab missing name requires user input")
 
-local first=mcp:callTool("backupLab",{backupName="phase0-backup",copy=true})
+local first=mcp:callTool("backupLab",{labName="lsplab",backupName="phase0-backup",copy=true})
 check(not FastMCP.isError(first) and first.ok == true,"first named legacy backup succeeds")
 
-local duplicateBackup=mcp:callTool("backupLab",{backupName="phase0-backup",copy=true})
+local duplicateBackup=mcp:callTool("backupLab",{labName="lsplab",backupName="phase0-backup",copy=true})
 equal(errorCode(duplicateBackup),"backupAlreadyExists","backupLab rejects an existing name")
 check(duplicateBackup.details.requiresUserInput == true,"backup collision requires another user choice")
 
 local copyDuplicate=mcp:callTool("copyExampleToLab",{
    sourcePath="example",
+   labName="lsplab",
    conflictAction="backupExisting",
    backupName="phase0-backup",
    confirmed=true

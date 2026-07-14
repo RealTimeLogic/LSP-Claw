@@ -28,9 +28,9 @@ The module-level compatibility API continues to address the legacy lab:
 lsplab
 ```
 
-Consequently, existing MCP tools behave exactly as before during Phase 1.
-Session selection and MCP `labName` routing are added in Phase 2; callers that
-need named storage in Phase 1 use `appmgr.createLab()` and `appmgr.getLab()`.
+The module-level API remains available for older callers that explicitly use
+`lsplab`. Current LSP-Claw MCP tools resolve named lab objects and do not depend
+on that compatibility singleton.
 
 The module provides APIs for:
 
@@ -93,7 +93,7 @@ be stored in the lab as normal files, but Mako does not auto-execute them.
 ## appmgr.create()
 
 Creates and initializes the legacy `lsplab` and `lsplab-backup` storage areas.
-This is the compatibility entry point used by the current MCP tools.
+This is the compatibility entry point for older single-lab callers.
 
 ```lua
 local ok, err = appmgr.create()
@@ -128,8 +128,7 @@ end
 
 ## appmgr.name()
 
-Returns the compatibility API's stable storage name. During Phase 1 this is
-always:
+Returns the compatibility API's stable storage name. This is always:
 
 ```lua
 "lsplab"
@@ -214,14 +213,36 @@ performs on `lsplab`:
 | `lab:getLabIo()` | Return storage IO and optional Xedge execution IO. |
 | `lab:start()` / `lab:stop()` | Start or stop this lab at its registered base path. |
 | `lab:isRunning()` | Return current-process running state. |
+| `lab:basePath()` | Return the direct registered URL base path. |
 | `lab:backup(name, copy)` | Back up this lab under `<lab>-backup`. |
 | `lab:listBackups()` | List only this lab's backups. |
 | `lab:restore(name)` | Restore this lab from one of its backups. |
 | `lab:copy2lab(io, path)` | Stage and replace this lab from another BAS IO. |
 | `lab:rmlab()` | Remove all files from this lab. |
 
-Phase 1 deliberately does not expose named lab selection through MCP. Code
-outside the manager must not treat `appmgr.createLab()` as an MCP selection.
+Mutating lab methods are exclusive. If another mutation is active, they return
+`nil, err, "labBusy"`. `lab:busy()` reports the active operation. The manager's
+route-change, rename, and delete functions share the same per-lab lock.
+
+### appmgr.setLabBasePath(name, basePath)
+
+Changes a stopped lab's unique direct URL base path. An empty path means the
+server root. MCP callers require explicit user confirmation before invoking
+this operation.
+
+### appmgr.renameLab(name, newName)
+
+Renames a stopped lab, its top-level storage directory, and its sibling backup
+directory. An automatically assigned name-based route follows the new name;
+an explicitly selected route is preserved.
+
+### appmgr.deleteLab(name)
+
+Deletes a stopped lab, all lab files, all backups, and its registry entry.
+This is irreversible and MCP callers require explicit user confirmation.
+
+MCP session selection is handled by `lspclaw.lua`; it stores only the active
+lab name and resolves the corresponding object with `appmgr.getLab()`.
 
 ## appmgr.getLabIo()
 
@@ -645,117 +666,54 @@ nil, err
 This is destructive. An MCP tool that exposes this function should require
 explicit user confirmation.
 
-## Typical MCP Server Workflow
+## Typical Named-Lab MCP Workflow
 
-Initialize storage:
+Create a user-named lab, or resolve an existing session selection:
 
 ```lua
-local ok, err = appmgr.create()
-if not ok then
-   return FastMCP.error("Cannot create lab", { error = err })
+local lab, err = appmgr.createLab("router-demo")
+-- Existing selection: local lab, err = appmgr.getLab(selectedName)
+if not lab then
+   return FastMCP.error("Cannot resolve lab", { error = err })
+end
+
+local labIo, executeIo = lab:getLabIo()
+```
+
+Use the lab object for lifecycle and content operations:
+
+```lua
+local ok, err = lab:backup("before-new-example", true)
+if not ok then return FastMCP.error("Cannot back up lab", { error=err }) end
+
+ok, err = lab:copy2lab(ghio, "AJAX")
+if not ok then return FastMCP.error("Cannot copy example", { error=err }) end
+
+if not lab:isRunning() then
+   ok, err = lab:start()
+   if not ok then return FastMCP.error("Cannot start lab", { error=err }) end
 end
 ```
 
-Detect runtime:
-
-```lua
-local labIo, executeIo = appmgr.getLabIo()
-
-local runtime = {
-   name = executeIo and "Xedge" or "Mako",
-   canExecuteXlua = executeIo ~= nil,
-   running = appmgr.running()
-}
-```
-
-List files in a GitHub example:
-
-```lua
-for path, name in appmgr.recDirIter(ghio, "AJAX") do
-   local file = appmgr.filePath(path, name)
-   trace(file)
-end
-```
-
-Copy a GitHub example into the lab:
-
-```lua
-local ok, err = appmgr.copy2lab(ghio, "AJAX")
-if not ok then
-   return FastMCP.error("Cannot copy example", { error = err })
-end
-```
-
-Move existing lab files to a backup before copying a new example:
-
-```lua
-local ok, err = appmgr.backup("before-new-example")
-if not ok then
-   return FastMCP.error("Cannot back up lab", { error = err })
-end
-
-ok, err = appmgr.copy2lab(ghio, "AJAX")
-if not ok then
-   return FastMCP.error("Cannot copy example", { error = err })
-end
-```
-
-Delete all lab files before copying a new example:
-
-```lua
-local ok, err = appmgr.rmlab()
-if not ok then
-   return FastMCP.error("Cannot clear lab", { error = err })
-end
-
-ok, err = appmgr.copy2lab(ghio, "AJAX")
-```
-
-Start the lab:
-
-```lua
-if not appmgr.running() then
-   local ok, err = appmgr.start()
-   if not ok then
-      return FastMCP.error("Cannot start lab", { error = err })
-   end
-end
-```
-
-## AI Agent Recommendations
-
-An MCP server built on `appmgr` should tell the AI agent to:
-
-1. Call `appmgr.create()` during server initialization or before lab operations.
-2. Use `appmgr.getLabIo()` to detect Mako vs Xedge.
-3. Treat `executeIo ~= nil` as Xedge runtime detection.
-4. Assume `.xlua` auto execution only works on Xedge.
-5. Check `appmgr.running()` before using `executeIo` for live `.xlua` updates.
-6. Use `appmgr.recDirIter()` for recursive source and lab listings.
-7. Use `appmgr.copy2lab()` for copying complete examples from GitHub IO into the lab.
-8. Use `appmgr.backup(name, true)` to copy-preserve existing lab files.
-9. Use `appmgr.backup(name, false)` or `appmgr.backup(name)` to move existing lab files out of the way.
-10. Use `appmgr.rmlab()` only after explicit user confirmation.
-11. Ask the user before deleting, moving, or overwriting existing lab files.
-
-## Notes for MCP Tool Authors
-
-The `appmgr` API intentionally provides higher-level operations for common lab
-management workflows. MCP tools should prefer these functions over duplicating
-recursive copy, backup, and delete logic.
+An MCP server should keep only the selected lab name in session state, resolve
+the object for each call, ask the user when selection is ambiguous, and require
+confirmation for destructive lifecycle changes. It must ask for explicit lab
+and backup names instead of inventing them.
 
 Recommended mapping:
 
-| MCP tool behavior | appmgr function |
+| MCP behavior | Manager or lab function |
 |---|---|
-| Create lab | `appmgr.create()` |
-| Runtime detection | `appmgr.getLabIo()` |
-| Start lab | `appmgr.start()` |
-| Stop lab | `appmgr.stop()` |
-| Lab running status | `appmgr.running()` |
+| List labs | `appmgr.listLabs()` |
+| Create lab | `appmgr.createLab(name, basePath)` |
+| Resolve lab | `appmgr.getLab(name)` |
+| Change route | `appmgr.setLabBasePath(name, basePath)` |
+| Rename lab | `appmgr.renameLab(name, newName)` |
+| Delete lab and backups | `appmgr.deleteLab(name)` |
+| Runtime IO detection | `lab:getLabIo()` |
+| Start or stop | `lab:start()` / `lab:stop()` |
+| Running status | `lab:isRunning()` |
 | Recursive listing | `appmgr.recDirIter(io, path, ldir)` |
-| Join iterator path and name | `appmgr.filePath(path, name)` |
-| Copy GitHub example to lab | `appmgr.copy2lab(ghio, path)` |
-| Move lab to backup | `appmgr.backup(name, false)` |
-| Copy lab to backup | `appmgr.backup(name, true)` |
-| Clear lab | `appmgr.rmlab()` |
+| Copy source tree | `lab:copy2lab(sourceIo, path)` |
+| Move or copy backup | `lab:backup(name, false)` / `lab:backup(name, true)` |
+| Clear lab | `lab:rmlab()` |

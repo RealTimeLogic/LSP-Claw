@@ -211,8 +211,24 @@ An initialize request creates a session and returns `MCP-Session-Id`.
 Subsequent POST, GET-stream, and DELETE requests must carry the ID. Missing IDs
 return 400; unknown, closed, or expired IDs return 404. DELETE closes all
 streams and removes the session. Cleanup runs opportunistically, and
-`cleanupSessions(now)` is available for deterministic tests. Sessions contain
-transport/client metadata only, not application workspace state.
+`cleanupSessions(now)` is available for deterministic tests.
+
+Tool, resource, and prompt handlers do not receive the transport's internal
+session table. For stateful requests, `ctx.sessionState` provides a narrow
+application-state accessor:
+
+```lua
+local selected = ctx.sessionState:get("activeLabName")
+local ok, err = ctx.sessionState:set("activeLabName", "router-demo")
+ctx.sessionState:remove("activeLabName")
+```
+
+Keys contain 1 to 128 characters. A session may store at most 32 keys. Values
+are limited to strings of at most 1024 bytes, numbers, booleans, or `nil`;
+applications should store identifiers rather than runtime objects or content.
+The values are discarded with the MCP session. Stateless
+requests have `ctx.sessionState == nil`. `ctx.sessionId` remains available for
+correlation, but `ctx.session` is intentionally not exposed.
 
 The default limits are the values shown above. Tests may inject `clock` and
 `sessionIdFactory`. A custom session ID must be unique, visible ASCII, and at

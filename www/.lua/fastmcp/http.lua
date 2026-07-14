@@ -156,6 +156,45 @@ local function requestServer(cmd, trustForwardedHeaders)
    }
 end
 
+local function makeSessionState(session)
+   if not session then return nil end
+   local values=session.applicationState
+   return {
+      get=function(self,key)
+         if type(key) ~= "string" then return nil end
+         return values[key]
+      end,
+      set=function(self,key,value)
+         if type(key) ~= "string" or key == "" or #key > 128 then
+            return nil,"session state key must contain 1 to 128 characters"
+         end
+         local valueType=type(value)
+         if value ~= nil and valueType ~= "string" and valueType ~= "number" and valueType ~= "boolean" then
+            return nil,"session state values must be strings, numbers, booleans, or nil"
+         end
+         if valueType == "string" and #value > 1024 then return nil,"session state string values cannot exceed 1024 bytes" end
+         local exists=values[key] ~= nil
+         if value ~= nil and not exists and session.applicationStateCount >= 32 then
+            return nil,"session state cannot contain more than 32 keys"
+         end
+         if value == nil and exists then session.applicationStateCount=session.applicationStateCount-1 end
+         if value ~= nil and not exists then session.applicationStateCount=session.applicationStateCount+1 end
+         values[key]=value
+         return true
+      end,
+      remove=function(self,key)
+         if type(key) ~= "string" then return nil,"session state key must be a string" end
+         if values[key] ~= nil then session.applicationStateCount=session.applicationStateCount-1 end
+         values[key]=nil
+         return true
+      end
+   }
+end
+
+-- Internal deterministic-test hook. Applications receive this only as
+-- ctx.sessionState and never receive the transport session table.
+Http._makeSessionState=makeSessionState
+
 local function newContext(cmd,request,session,stream,transport)
    local requestId = request and request.id or nil
    local server = requestServer(cmd, transport and transport.trustForwardedHeaders)
@@ -178,8 +217,8 @@ local function newContext(cmd,request,session,stream,transport)
       },
       server = server,
       serverOrigin = server and server.origin or nil,
-      session = session,
       sessionId = session and session.id or nil,
+      sessionState = makeSessionState(session),
       client = session and session.client or nil,
       stream = stream,
       user = nil,
@@ -303,6 +342,8 @@ function Streamable:createSession(protocolVersion, client)
       updatedAt = now,
       protocolVersion = protocolVersion or self.protocolVersion,
       client = client,
+      applicationState = {},
+      applicationStateCount = 0,
       streams = {}
    }
    self.sessions[id] = session

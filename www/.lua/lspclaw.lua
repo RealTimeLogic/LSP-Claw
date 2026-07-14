@@ -41,13 +41,15 @@ local function enumSchema(values, description, default)
 end
 
 local function result(message, runtime, data, warnings, nextActions)
+   data=data or {}
+   if runtime and runtime.labName and data.labName == nil then data.labName=runtime.labName end
    return {
       ok = true,
       message = message,
       runtime = runtime,
       warnings = warnings or {},
       nextActions = nextActions or {},
-      data = data or {}
+      data = data
    }
 end
 
@@ -160,36 +162,38 @@ local function dirname(path)
    return string.match(path, "^(.*)/[^/]+$") or ""
 end
 
-local function validatePath(path, required, label)
+local function validatePath(path, required, label, resolvedLabName)
    label = label or "path"
    if type(path) ~= "string" then
-      return nil, FastMCP.error(label .. " must be a string", { code = "invalidPath" })
+      return nil, FastMCP.error(label .. " must be a string", { code = "invalidPath", labName=resolvedLabName })
    end
    if path == "" then
       if required then
-	 return nil, FastMCP.error(label .. " is required", { code = "invalidPath" })
+	 return nil, FastMCP.error(label .. " is required", { code = "invalidPath", labName=resolvedLabName })
       end
       return ""
    end
    if path:find("\\", 1, true) or path:find("..", 1, true) or path:match("^%a:") or path:sub(1, 1) == "/" then
-      return nil, FastMCP.error(label .. " must be a safe relative BAS IO path", { code = "unsafePath", path = path })
+      return nil, FastMCP.error(label .. " must be a safe relative BAS IO path", { code = "unsafePath", path = path, labName=resolvedLabName })
    end
    return path:gsub("/+$", "")
 end
 
-local function labName(appmgr)
-   if appmgr and type(appmgr.name) == "function" then return appmgr.name() end
-   return "lsplab"
+local function labName(lab)
+   if lab and type(lab.name) == "function" then return lab.name(lab) end
+   return nil
 end
 
 local function backupNameRequiredError(appmgr)
+   local selectedLabName=labName(appmgr)
+   local selectedDescription=selectedLabName and ("lab "..selectedLabName) or "the selected lab"
    return FastMCP.error("A user-provided backup name is required. Ask the user what name to use; do not invent one.", {
       code = "backupNameRequired",
       requiresUserInput = true,
       field = "backupName",
-      labName = labName(appmgr),
+      labName = selectedLabName,
       nextActions = {
-         "Ask the user what backup name to use for lab " .. labName(appmgr) .. ".",
+         "Ask the user what backup name to use for "..selectedDescription..".",
          "Do not derive a backup name from the date, lab name, task, or conversation."
       }
    })
@@ -215,10 +219,10 @@ local function validateBackupName(name, appmgr)
       return nil, backupNameRequiredError(appmgr)
    end
    if type(name) ~= "string" then
-      return nil, FastMCP.error("backupName must be a string", { code = "invalidBackupName" })
+      return nil, FastMCP.error("backupName must be a string", { code = "invalidBackupName", labName=labName(appmgr) })
    end
    if name:find("\\", 1, true) or name:find("/", 1, true) or name:find("..", 1, true) or name:match("^%a:") then
-      return nil, FastMCP.error("backupName must be a safe backup directory name", { code = "unsafeBackupName", backupName = name })
+      return nil, FastMCP.error("backupName must be a safe backup directory name", { code = "unsafeBackupName", backupName = name, labName=labName(appmgr) })
    end
    return name
 end
@@ -229,16 +233,94 @@ local function mapBackupNameInputError(appmgr, validationErr)
    end
 end
 
-local function ensureLab(appmgr)
-   local ok, err = appmgr.create()
+local function ensureLab(lab)
+   local ok, err = lab:create()
    if not ok then
-      return nil, FastMCP.error("Cannot create lab", { code = "createLabFailed", error = err })
+      return nil, FastMCP.error("Cannot create lab", { code = "createLabFailed", labName=lab:name(), error = err })
    end
-   local labIo, executeIo = appmgr.getLabIo()
+   local labIo, executeIo = lab:getLabIo()
    if not labIo then
-      return nil, FastMCP.error("Lab IO is unavailable", { code = "labIoUnavailable" })
+      return nil, FastMCP.error("Lab IO is unavailable", { code = "labIoUnavailable", labName=lab:name() })
    end
    return labIo, executeIo
+end
+
+local function numberedLabChoices(labs)
+   local choices={}
+   for i,info in ipairs(labs or {}) do
+      tinsert(choices,{
+         number=i,
+         labName=info.name,
+         basePath=info.basePath,
+         running=info.running,
+         prompt=sfmt("Select lab %d",i)
+      })
+   end
+   return choices
+end
+
+local function sessionLabName(ctx)
+   if ctx and ctx.sessionState then return ctx.sessionState:get("activeLabName") end
+end
+
+local function setSessionLabName(ctx,name)
+   if not ctx or not ctx.sessionState then return nil,"A stateful MCP session is required" end
+   return ctx.sessionState:set("activeLabName",name)
+end
+
+local function resolveLab(appmgr,args,ctx)
+   args=args or {}
+   local requested=args.labName
+   if requested == "" then requested=nil end
+   local selected=requested or sessionLabName(ctx)
+   if selected then
+      local lab,err,code=appmgr.getLab(selected)
+      if lab then return lab,requested and "argument" or "session" end
+      return nil,FastMCP.error("The selected lab does not exist. Refresh the lab list and ask the user to choose again.",{
+         code=code == "invalidLabName" and code or "unknownLab",
+         labName=selected,
+         error=err,
+         nextActions={"Call listLabs to refresh the available labs.","Ask the user to select an available lab."}
+      })
+   end
+
+   local labs,err=appmgr.listLabs()
+   if not labs then return nil,FastMCP.error("Cannot list labs",{code="listLabsFailed",error=err}) end
+   if #labs == 1 then
+      local lab,labErr=appmgr.getLab(labs[1].name)
+      if not lab then return nil,FastMCP.error("Cannot resolve the only lab",{code="unknownLab",error=labErr}) end
+      if ctx and ctx.sessionState then setSessionLabName(ctx,lab:name()) end
+      return lab,"automatic"
+   end
+   if #labs == 0 then
+      return nil,FastMCP.error("No labs exist. Ask the user for a unique lab name before creating one.",{
+         code="labCreationRequired",
+         requiresUserInput=true,
+         field="labName",
+         nextActions={"Ask the user what name to use for the new lab.","Call createLab with that exact user-provided labName."}
+      })
+   end
+   return nil,FastMCP.error("Multiple labs are available and this session has not selected one. Ask the user which lab to use.",{
+      code="labSelectionRequired",
+      requiresUserInput=true,
+      field="labName",
+      choices=numberedLabChoices(labs),
+      nextActions={"Present the numbered lab choices to the user.","Call selectLab with the chosen labName."}
+   })
+end
+
+local function labOperationError(lab,operation,err,code,defaultCode)
+   if code == "labBusy" then
+      return FastMCP.error("The lab is busy with another operation.",{
+         code="labBusy",
+         labName=lab:name(),
+         requestedOperation=operation,
+         activeOperation=lab:busy(),
+         error=err,
+         nextActions={"Report the active operation to the user.","Retry only when the operation has completed and retrying matches the user's intent."}
+      })
+   end
+   return FastMCP.error("Cannot "..operation,{code=defaultCode,error=err,labName=lab:name()})
 end
 
 local function trimText(text)
@@ -319,16 +401,10 @@ local function configurationStatus(ctx)
    }, warnings
 end
 
-local function runtimeInfo(appmgr, ctx)
-   local labIo, executeIoOrErr = ensureLab(appmgr)
-   if not labIo then return nil, executeIoOrErr end
-   local _, executeIo = labIo, executeIoOrErr
-   local runtime = executeIo and "Xedge" or "Mako"
+local function runtimeInfo(appmgr,ctx,lab)
+   local executeIo=xedge ~= nil
+   local runtime=executeIo and "Xedge" or "Mako"
    local warnings = {}
-   if xedge and not executeIo then
-      local warning = markdownText(".info/runtimeWarningXedgeNoExecuteIo.md")
-      if warning then tinsert(warnings, warning) end
-   end
    local poweredBy = nil
    if mako and xedge then
       poweredBy = "Mako Server powers Xedge"
@@ -345,10 +421,18 @@ local function runtimeInfo(appmgr, ctx)
    for _, warning in ipairs(configurationWarnings or {}) do
       tinsert(warnings, warning)
    end
+   local labs,labListErr=appmgr.listLabs()
+   if not labs then
+      labs={}
+      tinsert(warnings,"Cannot read the lab registry: "..tostring(labListErr))
+   end
    return {
       runtime = runtime,
-      canExecuteXlua = executeIo ~= nil,
-      labRunning = appmgr.running(),
+      canExecuteXlua = executeIo,
+      labRunning = lab and lab:isRunning() or nil,
+      labName = lab and lab:name() or nil,
+      labBasePath = lab and lab:basePath() or nil,
+      labCount = #labs,
       poweredBy = poweredBy,
       guidance = executeIo and markdownText(".info/runtimeGuidanceXedge.md") or
 	 markdownText(".info/runtimeGuidanceMako.md"),
@@ -455,12 +539,14 @@ local function runtimeWarnings(runtime, analysis)
    return warnings
 end
 
-local function labAppPaths(files, ctx)
+local function labAppPaths(files,ctx,lab)
    local has = {}
    for _, file in ipairs(files or {}) do has[file] = true end
-   local entryPaths = { "/" }
-   if has["index.lsp"] then tinsert(entryPaths, "/index.lsp") end
-   if has["index.html"] then tinsert(entryPaths, "/index.html") end
+   local basePath=lab and lab:basePath() or ""
+   local mountPath=basePath == "" and "/" or "/"..basePath.."/"
+   local entryPaths = { mountPath }
+   if has["index.lsp"] then tinsert(entryPaths,mountPath.."index.lsp") end
+   if has["index.html"] then tinsert(entryPaths,mountPath.."index.html") end
    local origin = requestOrigin(ctx)
    local entryUrls
    if origin then
@@ -470,10 +556,12 @@ local function labAppPaths(files, ctx)
       end
    end
    return {
-      mountPath = "/",
-      appPath = "/",
+      labName=lab and lab:name() or nil,
+      basePath=basePath,
+      mountPath=mountPath,
+      appPath=mountPath,
       serverOrigin = origin,
-      appUrl = absoluteUrl(origin, "/"),
+      appUrl=absoluteUrl(origin,mountPath),
       entryPaths = entryPaths,
       entryUrls = entryUrls,
       commonEntryPaths = { "/", "/index.lsp", "/index.html" },
@@ -526,10 +614,10 @@ local function appendList(target, source)
    return target
 end
 
-local function labStatusData(appmgr, ctx)
-   local labIo, executeIoOrErr = ensureLab(appmgr)
+local function labStatusData(appmgr,lab,ctx)
+   local labIo, executeIoOrErr = ensureLab(lab)
    if not labIo then return nil, executeIoOrErr end
-   local runtime, runtimeErr = runtimeInfo(appmgr, ctx)
+   local runtime, runtimeErr = runtimeInfo(appmgr,ctx,lab)
    if not runtime then return nil, runtimeErr end
    local topMap, top = {}, {}
    local files, dirs = {}, {}
@@ -550,15 +638,17 @@ local function labStatusData(appmgr, ctx)
    table.sort(dirs)
    return {
       runtime = runtime.runtime,
+      labName=lab:name(),
+      basePath=lab:basePath(),
       canExecuteXlua = runtime.canExecuteXlua,
-      running = appmgr.running(),
+      running=lab:isRunning(),
       containsFiles = #files > 0,
       fileCount = #files,
       directoryCount = #dirs,
       topLevelEntries = top,
       files = files,
       directories = dirs,
-      labApp = labAppPaths(files, ctx)
+      labApp=labAppPaths(files,ctx,lab)
    }, runtime
 end
 
@@ -614,7 +704,7 @@ end
 
 local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
    mcp:tool("getRuntimeInfo", {
-      description = "Return Mako/Xedge runtime details for the LSP-Claw lab.",
+      description = "Return server-global Mako/Xedge runtime, configuration, and lab-capacity details. This tool does not require or change lab selection.",
       inputSchema = objectSchema(),
       annotations = readAnnotations
    }, function(args, ctx)
@@ -624,7 +714,7 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
    end)
 
    mcp:tool("readRuntimeTrace", {
-      description = "Return buffered BAS trace output and clear the runtime trace buffer.",
+      description = "Return and clear the server-global BAS trace buffer. Trace messages cannot be reliably attributed to an individual lab.",
       inputSchema = objectSchema(),
       annotations = readAnnotations
    }, function()
@@ -635,58 +725,207 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
 	    messageCount = 0,
 	    bufferSize = 0,
 	    enabled = false,
-	    cleared = true
+	    cleared = true,
+	    scope = "server-global",
+	    labAttributionReliable = false
 	 })
       end
       local data = runtimeTrace.read()
+      data.scope="server-global"
+      data.labAttributionReliable=false
       return result(data.trace ~= "" and "Runtime trace returned and cleared." or
 	 "Runtime trace buffer was empty and cleared.", nil, data)
    end)
 
+   mcp:tool("listLabs", {
+      description="List all named labs and their direct base paths. If exactly one lab exists, it is selected automatically for this MCP session.",
+      inputSchema=objectSchema(),
+      annotations=readAnnotations
+   }, function(args,ctx)
+      local labs,err=appmgr.listLabs()
+      if not labs then return FastMCP.error("Cannot list labs",{code="listLabsFailed",error=err}) end
+      local active=sessionLabName(ctx)
+      local selection="session"
+      if active then
+         local found=false
+         for _,lab in ipairs(labs) do if lower(lab.name) == lower(active) then active=lab.name found=true break end end
+         if not found then
+            if ctx and ctx.sessionState then ctx.sessionState:remove("activeLabName") end
+            active=nil
+            selection="none"
+         end
+      end
+      if #labs == 1 and not active then
+         active=labs[1].name
+         if ctx and ctx.sessionState then setSessionLabName(ctx,active) end
+         selection="automatic"
+      elseif not active then
+         selection="none"
+      end
+      return result("Labs listed.",nil,{
+         labs=labs,
+         choices=numberedLabChoices(labs),
+         labCount=#labs,
+         activeLabName=active,
+         selection=selection
+      },nil,#labs > 1 and not active and {"Present the numbered choices and ask the user which lab to select."} or nil)
+   end)
+
+   mcp:tool("selectLab", {
+      description="Select an existing lab for only the current MCP session. This does not start, stop, create, or modify the lab.",
+      inputSchema=objectSchema({labName=stringSchema("Exact lab name returned by listLabs.")},{"labName"}),
+      annotations=mutateAnnotations
+   }, function(args,ctx)
+      if not ctx or not ctx.sessionState then
+         return FastMCP.error("Lab selection requires a stateful MCP session.",{code="statefulSessionRequired"})
+      end
+      local lab,err,code=appmgr.getLab(args.labName)
+      if not lab then return FastMCP.error("Lab was not found",{code=code or "unknownLab",labName=args.labName,error=err}) end
+      local ok,stateErr=setSessionLabName(ctx,lab:name())
+      if not ok then return FastMCP.error("Cannot store the lab selection",{code="sessionStateFailed",error=stateErr}) end
+      return result("Lab selected for this MCP session.",runtimeInfo(appmgr,ctx,lab),{
+         activeLabName=lab:name(),
+         basePath=lab:basePath(),
+         selection="session"
+      })
+   end)
+
    mcp:tool("getLabStatus", {
       description = "Return lab runtime, running state, file counts, top-level entries, and file lists.",
-      inputSchema = objectSchema(),
+      inputSchema=objectSchema({labName=stringSchema("Optional explicit lab override; otherwise use this session's selection.")}),
       annotations = readAnnotations
    }, function(args, ctx)
-      local status, runtimeOrErr = labStatusData(appmgr, ctx)
+      local lab,labErr=resolveLab(appmgr,args,ctx)
+      if not lab then return labErr end
+      local status, runtimeOrErr = labStatusData(appmgr,lab,ctx)
       if not status then return runtimeOrErr end
+      status.labCount=runtimeOrErr.labCount
+      status.activeLabName=sessionLabName(ctx)
       local nextActions = status.running and labOpenNextActions(infoIo) or labStoppedNextActions()
       return result("Lab status returned.", runtimeOrErr, status, runtimeOrErr.warnings, nextActions)
    end)
 
    mcp:tool("createLab", {
-      description = "Create the local LSP-Claw lab storage if it does not already exist.",
-      inputSchema = objectSchema(),
+      description="Create a uniquely named lab and select it for this MCP session. Never invent the labName; use the name provided by the user.",
+      inputSchema=objectSchema({
+         labName=stringSchema("Unique lab name explicitly provided by the user."),
+         basePath=stringSchema("Optional direct URL base path. Empty means root; omit to assign automatically.")
+      },{"labName"}),
       annotations = mutateAnnotations
    }, function(args, ctx)
-      local labIo, executeIoOrErr = ensureLab(appmgr)
-      if not labIo then return executeIoOrErr end
-      local runtime = runtimeInfo(appmgr, ctx)
-      return result("Lab is ready.", runtime, { created = true }, runtime.warnings)
+      local before,err=appmgr.listLabs()
+      if not before then return FastMCP.error("Cannot list labs",{code="listLabsFailed",error=err}) end
+      local routeChanged
+      if #before == 1 and before[1].basePath == "" and before[1].basePathExplicit ~= true then
+         local existing=assert(appmgr.getLab(before[1].name))
+         if existing:isRunning() then
+            return FastMCP.error("The existing root-mounted lab must be stopped before a second lab can be created and assigned a distinct route.",{
+               code="labMustBeStopped",
+               labName=existing:name(),
+               nextActions={"Stop the existing lab.","Call createLab again with the user-provided new lab name."}
+            })
+         end
+         local changed,changeErr,changeCode=appmgr.setLabBasePath(existing:name(),existing:name(),false)
+         if not changed then return FastMCP.error("Cannot assign the existing lab a distinct route",{code=changeCode or "setLabBasePathFailed",error=changeErr}) end
+         routeChanged={labName=existing:name(),oldBasePath="",newBasePath=existing:name()}
+      end
+      local lab,createErr,createCode=appmgr.createLab(args.labName,args.basePath)
+      if not lab then
+         if routeChanged then appmgr.setLabBasePath(routeChanged.labName,"",false) end
+         return FastMCP.error("Cannot create lab",{code=createCode or "createLabFailed",labName=args.labName,error=createErr})
+      end
+      if ctx and ctx.sessionState then setSessionLabName(ctx,lab:name()) end
+      local runtime=runtimeInfo(appmgr,ctx,lab)
+      return result("Lab created and selected.",runtime,{
+         created=true,
+         activeLabName=lab:name(),
+         basePath=lab:basePath(),
+         routeChanged=routeChanged
+      },runtime.warnings,routeChanged and {"Tell the user that the existing lab URL changed to /"..routeChanged.newBasePath.."/."} or nil)
+   end)
+
+   mcp:tool("renameLab", {
+      description="Rename a stopped lab and its backup storage. Requires explicit confirmation.",
+      inputSchema=objectSchema({
+         labName=stringSchema("Existing lab name."),
+         newLabName=stringSchema("New unique lab name explicitly provided by the user."),
+         confirmed=boolSchema("Must be true after explicit user confirmation.",false)
+      },{"labName","newLabName"}),
+      annotations=destructiveAnnotations
+   }, function(args,ctx)
+      if args.confirmed ~= true then return FastMCP.error("Renaming a lab requires confirmation.",{code="renameLabRequiresConfirmation",requiresConfirmation=true,labName=args.labName,newLabName=args.newLabName}) end
+      local lab,err,code=appmgr.renameLab(args.labName,args.newLabName)
+      if not lab then
+         local existing=appmgr.getLab(args.labName)
+         if code == "labBusy" and existing then return labOperationError(existing,"rename lab",err,code,"renameLabFailed") end
+         return FastMCP.error("Cannot rename lab",{code=code or "renameLabFailed",labName=args.labName,newLabName=args.newLabName,error=err})
+      end
+      if sessionLabName(ctx) and lower(sessionLabName(ctx)) == lower(args.labName) then setSessionLabName(ctx,lab:name()) end
+      local runtime=runtimeInfo(appmgr,ctx,lab)
+      return result("Lab renamed.",runtime,{renamed=true,oldLabName=args.labName,newLabName=lab:name(),basePath=lab:basePath()},runtime.warnings)
+   end)
+
+   mcp:tool("deleteLab", {
+      description="Permanently delete a stopped lab, all lab files, and all of its backups. Requires explicit confirmation.",
+      inputSchema=objectSchema({
+         labName=stringSchema("Lab to delete."),
+         confirmed=boolSchema("Must be true after explicit user confirmation.",false)
+      },{"labName"}),
+      annotations=destructiveAnnotations
+   }, function(args,ctx)
+      if args.confirmed ~= true then return FastMCP.error("Deleting a lab and all of its backups requires confirmation.",{code="deleteLabRequiresConfirmation",requiresConfirmation=true,labName=args.labName}) end
+      local ok,err,code=appmgr.deleteLab(args.labName)
+      if not ok then
+         local existing=appmgr.getLab(args.labName)
+         if code == "labBusy" and existing then return labOperationError(existing,"delete lab",err,code,"deleteLabFailed") end
+         return FastMCP.error("Cannot delete lab",{code=code or "deleteLabFailed",labName=args.labName,error=err})
+      end
+      if sessionLabName(ctx) and lower(sessionLabName(ctx)) == lower(args.labName) then ctx.sessionState:remove("activeLabName") end
+      return result("Lab and its backups were deleted.",runtimeInfo(appmgr,ctx),{deleted=true,labName=args.labName})
+   end)
+
+   mcp:tool("setLabBasePath", {
+      description="Change the direct URL base path for a stopped lab. Empty means the server root. Requires explicit confirmation.",
+      inputSchema=objectSchema({
+         labName=stringSchema("Existing lab name."),
+         basePath=stringSchema("Empty for root or one URL-safe path segment."),
+         confirmed=boolSchema("Must be true after explicit user confirmation.",false)
+      },{"labName","basePath"}),
+      annotations=mutateAnnotations
+   }, function(args,ctx)
+      if args.confirmed ~= true then return FastMCP.error("Changing a lab URL requires confirmation.",{code="setLabBasePathRequiresConfirmation",requiresConfirmation=true,labName=args.labName,basePath=args.basePath}) end
+      local lab,err,code=appmgr.setLabBasePath(args.labName,args.basePath,true)
+      if not lab then
+         local existing=appmgr.getLab(args.labName)
+         if code == "labBusy" and existing then return labOperationError(existing,"change lab base path",err,code,"setLabBasePathFailed") end
+         return FastMCP.error("Cannot change lab base path",{code=code or "setLabBasePathFailed",labName=args.labName,basePath=args.basePath,error=err})
+      end
+      local runtime=runtimeInfo(appmgr,ctx,lab)
+      return result("Lab base path changed.",runtime,{changed=true,basePath=lab:basePath(),labApp=labAppPaths({},ctx,lab)},runtime.warnings)
    end)
 
    mcp:tool("startLab", {
       description = "Start the lab app through appmgr.",
-      inputSchema = objectSchema(),
+      inputSchema=objectSchema({labName=stringSchema("Optional explicit lab override; otherwise use this session's selection.")}),
       annotations = mutateAnnotations
    }, function(args, ctx)
-      local labIo, executeIoOrErr = ensureLab(appmgr)
+      local lab,labErr=resolveLab(appmgr,args,ctx)
+      if not lab then return labErr end
+      local labIo, executeIoOrErr = ensureLab(lab)
       if not labIo then return executeIoOrErr end
-      local runtime = runtimeInfo(appmgr, ctx)
+      local runtime = runtimeInfo(appmgr,ctx,lab)
       local files = listLabFileNames(appmgr, labIo, false)
       local hasXlua = false
       for _, file in ipairs(files) do if endsWith(lower(file), ".xlua") then hasXlua = true end end
       local warnings = runtimeWarnings(runtime, { hasXlua = hasXlua })
-      if appmgr.running() then
-	 local data = { started = false, alreadyRunning = true, labApp = labAppPaths(files, ctx) }
+      if lab:isRunning() then
+	 local data = { started = false, alreadyRunning = true, labApp = labAppPaths(files,ctx,lab) }
 	 return result("Lab is already running.", runtime, data, warnings, labOpenNextActions(infoIo))
       end
-      local ok, err = appmgr.start()
-      runtime = runtimeInfo(appmgr, ctx)
-      if not ok then
-	 return FastMCP.error("Cannot start lab", { code = "startLabFailed", error = err })
-      end
-      local data = { started = true, labApp = labAppPaths(files, ctx) }
+      local ok, err, operationCode = lab:start()
+      runtime = runtimeInfo(appmgr,ctx,lab)
+      if not ok then return labOperationError(lab,"start lab",err,operationCode,"startLabFailed") end
+      local data = { started = true, labApp = labAppPaths(files,ctx,lab) }
       local nextActions = labOpenNextActions(infoIo)
       appendList(nextActions, labStartedExtraNextActions())
       return result("Lab started.", runtime, data, warnings, nextActions)
@@ -694,19 +933,19 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
 
    mcp:tool("stopLab", {
       description = "Stop the lab app through appmgr.",
-      inputSchema = objectSchema(),
+      inputSchema=objectSchema({labName=stringSchema("Optional explicit lab override; otherwise use this session's selection.")}),
       annotations = mutateAnnotations
    }, function(args, ctx)
-      local runtime, runtimeErr = runtimeInfo(appmgr, ctx)
+      local lab,labErr=resolveLab(appmgr,args,ctx)
+      if not lab then return labErr end
+      local runtime, runtimeErr = runtimeInfo(appmgr,ctx,lab)
       if not runtime then return runtimeErr end
-      if not appmgr.running() then
+      if not lab:isRunning() then
 	 return result("Lab is already stopped.", runtime, { stopped = false, alreadyStopped = true }, runtime.warnings)
       end
-      local ok, err = appmgr.stop()
-      runtime = runtimeInfo(appmgr, ctx)
-      if not ok then
-	 return FastMCP.error("Cannot stop lab", { code = "stopLabFailed", error = err })
-      end
+      local ok, err, operationCode = lab:stop()
+      runtime = runtimeInfo(appmgr,ctx,lab)
+      if not ok then return labOperationError(lab,"stop lab",err,operationCode,"stopLabFailed") end
       return result("Lab stopped.", runtime, { stopped = true }, runtime.warnings)
    end)
 
@@ -780,24 +1019,28 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
 	 sourcePath = stringSchema("GitHub directory whose contents are copied into the lab root. Use AJAX/www to put index.lsp at lab root; do not use AJAX unless the lab should contain a www directory."),
 	 conflictAction = enumSchema({ "abort", "deleteExisting", "backupExisting" }, "What to do if the lab already contains files.", "abort"),
 	 confirmed = boolSchema("True only after the user explicitly confirmed the conflict action.", false),
-	 backupName = stringSchema("Backup name when conflictAction is backupExisting.")
+	 backupName = stringSchema("Backup name when conflictAction is backupExisting."),
+	 labName = stringSchema("Optional explicit lab override; otherwise use this session's selection.")
       }, { "sourcePath" }),
       annotations = destructiveAnnotations
-   }, function(args)
-      local sourcePath, sourceErr = validatePath(args.sourcePath, true, "sourcePath")
+   }, function(args,ctx)
+      local lab,resolveErr=resolveLab(appmgr,args,ctx)
+      if not lab then return resolveErr end
+      local sourcePath, sourceErr = validatePath(args.sourcePath,true,"sourcePath",lab:name())
       if not sourcePath then return sourceErr end
       local st, statErr = ghio:stat(sourcePath)
-      if not st then return FastMCP.error("Example source path was not found", { code = "exampleSourceNotFound", sourcePath = sourcePath, error = statErr }) end
-      if not st.isdir then return FastMCP.error("Example source path must be a directory", { code = "exampleSourceNotDirectory", sourcePath = sourcePath }) end
-      local labIo, labErr = ensureLab(appmgr)
+      if not st then return FastMCP.error("Example source path was not found", { code = "exampleSourceNotFound", labName=lab:name(), sourcePath = sourcePath, error = statErr }) end
+      if not st.isdir then return FastMCP.error("Example source path must be a directory", { code = "exampleSourceNotDirectory", labName=lab:name(), sourcePath = sourcePath }) end
+      local labIo, labErr = ensureLab(lab)
       if not labIo then return labErr end
-      local runtime, runtimeErr = runtimeInfo(appmgr)
+      local runtime, runtimeErr = runtimeInfo(appmgr,ctx,lab)
       if not runtime then return runtimeErr end
       local conflictAction = args.conflictAction or "abort"
       local labHasEntries = labContainsEntries(labIo)
       if labHasEntries and args.confirmed ~= true then
 	 return FastMCP.error("The lab already contains files. Ask the user whether to abort, delete existing files, or back up existing files before copying.", {
 	    code = "labConflictRequiresConfirmation",
+	    labName=lab:name(),
 	    requiresConfirmation = true,
 	    choices = { "abort", "deleteExisting", "backupExisting" },
 	    nextActions = copyConflictNextActions()
@@ -812,22 +1055,22 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
 	       copySemantics = markdownText(".info/copyExampleToLabAbortedSemantics.md")
 	    }, runtime.warnings)
 	 elseif conflictAction == "deleteExisting" then
-	    -- appmgr.copy2lab stages the source first, then replaces the lab.
+	    -- lab:copy2lab stages the source first, then replaces the lab.
 	 elseif conflictAction == "backupExisting" then
-	    local backupName, backupErr = validateBackupName(args.backupName, appmgr)
+	    local backupName, backupErr = validateBackupName(args.backupName,lab)
 	    if not backupName then return backupErr end
-	    local ok, err, backupCode = appmgr.backup(backupName, true)
+	    local ok, err, backupCode = lab:backup(backupName,true)
 	    if not ok then
-	       if backupCode == "backupAlreadyExists" then return backupAlreadyExistsError(appmgr, backupName, err) end
-	       return FastMCP.error("Cannot back up lab before copy", { code = "backupLabFailed", backupName = backupName, error = err })
+	       if backupCode == "backupAlreadyExists" then return backupAlreadyExistsError(lab,backupName,err) end
+	       return labOperationError(lab,"back up lab before copy",err,backupCode,"backupLabFailed")
 	    end
 	    args.backupName = backupName
 	 else
-	    return FastMCP.error("Invalid conflictAction", { code = "invalidConflictAction", conflictAction = conflictAction })
+	    return FastMCP.error("Invalid conflictAction", { code = "invalidConflictAction", labName=lab:name(), conflictAction = conflictAction })
 	 end
       end
-      local ok, err = appmgr.copy2lab(ghio, sourcePath)
-      if not ok then return FastMCP.error("Cannot copy example to lab", { code = "copyExampleFailed", sourcePath = sourcePath, error = err }) end
+      local ok, err, operationCode = lab:copy2lab(ghio,sourcePath)
+      if not ok then return labOperationError(lab,"copy example to lab",err,operationCode,"copyExampleFailed") end
       local copiedLabFiles = listLabFileNames(appmgr, labIo, false)
       return result("Example copied to lab.", runtime, {
 	 copied = true,
@@ -843,13 +1086,16 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
       description = "List files in the local lab.",
       inputSchema = objectSchema({
 	 recursive = boolSchema("Reserved; recursive listing is always used.", true),
-	 includeDirectories = boolSchema("Include directory entries.", false)
+	 includeDirectories = boolSchema("Include directory entries.", false),
+	 labName = stringSchema("Optional explicit lab override; otherwise use this session's selection.")
       }),
       annotations = readAnnotations
-   }, function(args)
-      local labIo, labErr = ensureLab(appmgr)
+   }, function(args,ctx)
+      local lab,resolveErr=resolveLab(appmgr,args,ctx)
+      if not lab then return resolveErr end
+      local labIo, labErr = ensureLab(lab)
       if not labIo then return labErr end
-      local runtime = runtimeInfo(appmgr)
+      local runtime = runtimeInfo(appmgr,ctx,lab)
       local files, dirs = listLabFileNames(appmgr, labIo, args.includeDirectories == true)
       return result("Lab files listed.", runtime, {
 	 recursive = true,
@@ -864,20 +1110,23 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
    mcp:tool("readLabFile", {
       description = "Read one file from the local lab.",
       inputSchema = objectSchema({
-	 path = stringSchema("Lab file path.")
+	 path = stringSchema("Lab file path."),
+	 labName = stringSchema("Optional explicit lab override; otherwise use this session's selection.")
       }, { "path" }),
       annotations = readAnnotations
-   }, function(args)
-      local path, pathErr = validatePath(args.path, true, "path")
+   }, function(args,ctx)
+      local lab,resolveErr=resolveLab(appmgr,args,ctx)
+      if not lab then return resolveErr end
+      local path, pathErr = validatePath(args.path,true,"path",lab:name())
       if not path then return pathErr end
-      local labIo, labErr = ensureLab(appmgr)
+      local labIo, labErr = ensureLab(lab)
       if not labIo then return labErr end
       local st, err = labIo:stat(path)
-      if not st then return FastMCP.error("Lab file was not found", { code = "labFileNotFound", path = path, error = err }) end
-      if st.isdir then return FastMCP.error("Path is a directory", { code = "labPathIsDirectory", path = path }) end
+      if not st then return FastMCP.error("Lab file was not found", { code = "labFileNotFound", labName=lab:name(), path = path, error = err }) end
+      if st.isdir then return FastMCP.error("Path is a directory", { code = "labPathIsDirectory", labName=lab:name(), path = path }) end
       local text, readErr = readText(labIo, path)
-      if not text then return FastMCP.error("Cannot read lab file", { code = "readLabFileFailed", path = path, error = readErr }) end
-      return result("Lab file read.", nil, { path = path, content = text, size = #text })
+      if not text then return FastMCP.error("Cannot read lab file", { code = "readLabFileFailed", labName=lab:name(), path = path, error = readErr }) end
+      return result("Lab file read.",runtimeInfo(appmgr,ctx,lab),{path=path,content=text,size=#text})
    end)
 
    mcp:tool("writeLabFile", {
@@ -887,40 +1136,48 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
 	 content = stringSchema("File content."),
 	 overwrite = boolSchema("Allow replacing an existing file.", false),
 	 confirmed = boolSchema("True only after the user explicitly confirmed overwrite.", false),
-	 activateXlua = boolSchema("For running Xedge labs, activate .xlua when possible.", false)
+	 activateXlua = boolSchema("For running Xedge labs, activate .xlua when possible.", false),
+	 labName = stringSchema("Optional explicit lab override; otherwise use this session's selection.")
       }, { "path", "content" }),
       annotations = mutateAnnotations
-   }, function(args)
-      local path, pathErr = validatePath(args.path, true, "path")
+   }, function(args,ctx)
+      local lab,resolveErr=resolveLab(appmgr,args,ctx)
+      if not lab then return resolveErr end
+      local path, pathErr = validatePath(args.path,true,"path",lab:name())
       if not path then return pathErr end
-      local labIo, executeIoOrErr = ensureLab(appmgr)
+      local labIo, executeIoOrErr = ensureLab(lab)
       if not labIo then return executeIoOrErr end
       local executeIo = executeIoOrErr
-      local runtime = runtimeInfo(appmgr)
+      local runtime = runtimeInfo(appmgr,ctx,lab)
       local st = labIo:stat(path)
-      if st and st.isdir then return FastMCP.error("Cannot overwrite a directory", { code = "labPathIsDirectory", path = path }) end
+      if st and st.isdir then return FastMCP.error("Cannot overwrite a directory", { code = "labPathIsDirectory", labName=lab:name(), path = path }) end
       if st and args.overwrite ~= true then
-	 return FastMCP.error("Lab file exists and overwrite is false", { code = "overwriteRequired", path = path })
+	 return FastMCP.error("Lab file exists and overwrite is false", { code = "overwriteRequired", labName=lab:name(), path = path })
       end
       if st and args.overwrite == true and args.confirmed ~= true then
 	 return FastMCP.error("Overwriting an existing lab file requires confirmed = true after user confirmation", {
 	    code = "overwriteRequiresConfirmation",
+	    labName=lab:name(),
 	    requiresConfirmation = true,
 	    path = path
 	 })
       end
       local warnings = runtimeWarnings(runtime, { hasXlua = endsWith(lower(path), ".xlua") })
       local targetIo, activatedXlua = labIo, false
-      if args.activateXlua == true and endsWith(lower(path), ".xlua") and executeIo and appmgr.running() then
+      if args.activateXlua == true and endsWith(lower(path), ".xlua") and executeIo and lab:isRunning() then
 	 targetIo, activatedXlua = executeIo, true
       elseif args.activateXlua == true then
 	 local warning = markdownText(".info/runtimeWarningActivateXluaUnavailable.md")
 	 if warning then tinsert(warnings, warning) end
       end
-      local ok, err = ensureParentDirs(targetIo, path)
-      if not ok then return FastMCP.error("Cannot create parent directories", { code = "mkdirFailed", path = path, error = err }) end
-      ok, err = writeText(targetIo, path, tostring(args.content or ""))
-      if not ok then return FastMCP.error("Cannot write lab file", { code = "writeLabFileFailed", path = path, error = err }) end
+      local ok,err,operationCode=lab:exclusive("writeLabFile",function()
+         local writeOk,writeErr=ensureParentDirs(targetIo,path)
+         if not writeOk then return nil,writeErr end
+         writeOk,writeErr=writeText(targetIo,path,tostring(args.content or ""))
+         if writeOk then lab:touch() end
+         return writeOk,writeErr
+      end)
+      if not ok then return labOperationError(lab,"write lab file",err,operationCode,"writeLabFileFailed") end
       return result("Lab file written.", runtime, {
 	 path = path,
 	 bytes = #(tostring(args.content or "")),
@@ -930,23 +1187,27 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
    end)
 
    mcp:tool("clearLab", {
-      description = "Clear all lab files using appmgr.rmlab. Requires explicit confirmation.",
+      description = "Clear all files in the resolved lab. Requires explicit confirmation.",
       inputSchema = objectSchema({
-	 confirmed = boolSchema("Must be true after explicit user confirmation.", false)
+	 confirmed = boolSchema("Must be true after explicit user confirmation.", false),
+	 labName = stringSchema("Optional explicit lab override; otherwise use this session's selection.")
       }),
       annotations = destructiveAnnotations
-   }, function(args)
-      local runtime, runtimeErr = runtimeInfo(appmgr)
+   }, function(args,ctx)
+      local lab,resolveErr=resolveLab(appmgr,args,ctx)
+      if not lab then return resolveErr end
+      local runtime, runtimeErr = runtimeInfo(appmgr,ctx,lab)
       if not runtime then return runtimeErr end
       if args.confirmed ~= true then
 	 return FastMCP.error("Clearing the lab requires confirmed = true after explicit user confirmation", {
 	    code = "clearLabRequiresConfirmation",
+	    labName=lab:name(),
 	    requiresConfirmation = true,
 	    choices = { "abort", "clearLab" }
 	 })
       end
-      local ok, err = appmgr.rmlab()
-      if not ok then return FastMCP.error("Cannot clear lab", { code = "clearLabFailed", error = err }) end
+      local ok,err,operationCode=lab:rmlab()
+      if not ok then return labOperationError(lab,"clear lab",err,operationCode,"clearLabFailed") end
       return result("Lab cleared.", runtime, { cleared = true }, runtime.warnings)
    end)
 
@@ -954,22 +1215,27 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
       description = "Back up the lab using a name explicitly provided by the user. If the user did not provide a name, ask before calling this tool; never invent or infer one. Existing backups are never overwritten or merged. copy=false moves files out of the lab.",
       inputSchema = objectSchema({
 	 backupName = stringSchema("Required name explicitly provided by the user under appmgr's lsplab-backup namespace. Never generate this value."),
-	 copy = boolSchema("true copies and preserves lab files; false moves files out of the lab.", true)
+	 copy = boolSchema("true copies and preserves lab files; false moves files out of the lab.", true),
+	 labName = stringSchema("Optional explicit lab override; otherwise use this session's selection.")
       }, { "backupName" }),
-      onInputError = function(validationErr)
-         return mapBackupNameInputError(appmgr, validationErr)
+      onInputError = function(validationErr,args,ctx)
+         local selected=args and args.labName or sessionLabName(ctx)
+         local lab=selected and appmgr.getLab(selected) or nil
+         return mapBackupNameInputError(lab,validationErr)
       end,
       annotations = mutateAnnotations
-   }, function(args)
-      local runtime, runtimeErr = runtimeInfo(appmgr)
+   }, function(args,ctx)
+      local lab,resolveErr=resolveLab(appmgr,args,ctx)
+      if not lab then return resolveErr end
+      local runtime, runtimeErr = runtimeInfo(appmgr,ctx,lab)
       if not runtime then return runtimeErr end
-      local backupName, backupErr = validateBackupName(args.backupName, appmgr)
+      local backupName, backupErr = validateBackupName(args.backupName,lab)
       if not backupName then return backupErr end
       local copy = args.copy ~= false
-      local ok, err, backupCode = appmgr.backup(backupName, copy)
+      local ok, err, backupCode = lab:backup(backupName,copy)
       if not ok then
-         if backupCode == "backupAlreadyExists" then return backupAlreadyExistsError(appmgr, backupName, err) end
-         return FastMCP.error("Cannot back up lab", { code = "backupLabFailed", backupName = backupName, error = err })
+         if backupCode == "backupAlreadyExists" then return backupAlreadyExistsError(lab,backupName,err) end
+         return labOperationError(lab,"back up lab",err,backupCode,"backupLabFailed")
       end
       return result(copy and "Lab copied to backup." or "Lab moved to backup.", runtime, {
 	 backupName = backupName,
@@ -980,13 +1246,15 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
 
    mcp:tool("listLabBackups", {
       description = "List available lab backup directories with numbered choices for restore selection.",
-      inputSchema = objectSchema(),
+      inputSchema=objectSchema({labName=stringSchema("Optional explicit lab override; otherwise use this session's selection.")}),
       annotations = readAnnotations
-   }, function()
-      local runtime, runtimeErr = runtimeInfo(appmgr)
+   }, function(args,ctx)
+      local lab,resolveErr=resolveLab(appmgr,args,ctx)
+      if not lab then return resolveErr end
+      local runtime, runtimeErr = runtimeInfo(appmgr,ctx,lab)
       if not runtime then return runtimeErr end
-      local backups, err = appmgr.listBackups()
-      if not backups then return FastMCP.error("Cannot list lab backups", { code = "listLabBackupsFailed", error = err }) end
+      local backups, err = lab:listBackups()
+      if not backups then return FastMCP.error("Cannot list lab backups", { code = "listLabBackupsFailed", labName=lab:name(), error = err }) end
       local choices = numberedBackupChoices(backups)
       local nextActions = {}
       if #choices > 0 then
@@ -1006,18 +1274,22 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
       description = "Restore a named lab backup into the lab. Requires explicit confirmation.",
       inputSchema = objectSchema({
 	 backupName = stringSchema("Backup directory name returned by listLabBackups."),
-	 confirmed = boolSchema("Must be true after explicit user confirmation.", false)
+	 confirmed = boolSchema("Must be true after explicit user confirmation.", false),
+	 labName = stringSchema("Optional explicit lab override; otherwise use this session's selection.")
       }, { "backupName" }),
       annotations = destructiveAnnotations
-   }, function(args)
-      local runtime, runtimeErr = runtimeInfo(appmgr)
+   }, function(args,ctx)
+      local lab,resolveErr=resolveLab(appmgr,args,ctx)
+      if not lab then return resolveErr end
+      local runtime, runtimeErr = runtimeInfo(appmgr,ctx,lab)
       if not runtime then return runtimeErr end
-      local backupName, backupErr = validateBackupName(args.backupName)
+      local backupName, backupErr = validateBackupName(args.backupName,lab)
       if not backupName then return backupErr end
       if args.confirmed ~= true then
-	 local backups = appmgr.listBackups() or {}
+	 local backups = lab:listBackups() or {}
 	 return FastMCP.error("Restoring a lab backup replaces the current lab and requires confirmed = true after explicit user confirmation.", {
 	    code = "restoreLabRequiresConfirmation",
+	    labName=lab:name(),
 	    requiresConfirmation = true,
 	    backupName = backupName,
 	    choices = numberedBackupChoices(backups),
@@ -1027,11 +1299,13 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
 	    }
 	 })
       end
-      local ok, err = appmgr.restore(backupName)
+      local ok, err, operationCode = lab:restore(backupName)
       if not ok then
-	 local backups = appmgr.listBackups() or {}
+	 if operationCode == "labBusy" then return labOperationError(lab,"restore lab",err,operationCode,"restoreLabFailed") end
+	 local backups = lab:listBackups() or {}
 	 return FastMCP.error("Cannot restore lab backup", {
 	    code = "restoreLabFailed",
+	    labName=lab:name(),
 	    backupName = backupName,
 	    error = err,
 	    choices = numberedBackupChoices(backups),
@@ -1043,7 +1317,7 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
 	    }
 	 })
       end
-      local labIo, labErr = ensureLab(appmgr)
+      local labIo, labErr = ensureLab(lab)
       if not labIo then return labErr end
       local files, dirs = listLabFileNames(appmgr, labIo, true)
       return result("Lab backup restored.", runtime, {
@@ -1087,7 +1361,9 @@ local function registerResources(mcp, ghio, info, appmgr, instructions, infoIo)
       mimeType = "application/json",
       annotations = readAnnotations
    }, function(ctx)
-      local status, err = labStatusData(appmgr, ctx)
+      local lab,resolveErr=resolveLab(appmgr,{},ctx)
+      if not lab then return resolveErr end
+      local status, err = labStatusData(appmgr,lab,ctx)
       if not status then return err end
       return status
    end)

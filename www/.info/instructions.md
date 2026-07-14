@@ -15,7 +15,7 @@ LSP-Claw exposes two separate environments:
    - Typical tools: getExampleCatalog, readExampleFile, copyExampleToLab.
 
 2. Local lab app
-   - Writable BAS/Mako/Xedge app managed by LSP-Claw.
+   - One or more writable BAS/Mako/Xedge apps managed by LSP-Claw.
    - Use for all changes after copying an example or creating a new app.
    - Typical tools: createLab, listLabFiles, readLabFile, writeLabFile,
      startLab, stopLab, backupLab, listLabBackups, restoreLab,
@@ -24,12 +24,35 @@ LSP-Claw exposes two separate environments:
 Only modify lab files through the MCP lab tools. Respect lab path restrictions,
 overwrite protections, and backup/restore semantics.
 
+## Multiple Labs
+
+- Call `listLabs` when the user has not identified a lab or when a stored
+  selection is no longer valid.
+- If exactly one lab exists, LSP-Claw selects it automatically for the current
+  MCP session.
+- If multiple labs exist and the session has no selection, present the numbered
+  choices and ask the user. Never guess a lab.
+- Use `selectLab` to change only the current MCP session. Selection never starts,
+  stops, creates, or modifies a lab.
+- An explicit `labName` on a lab-bound tool overrides selection for that call
+  only; it does not change the session selection.
+- When no lab exists, ask the user for a unique name before calling `createLab`.
+  Never invent or infer a lab name.
+- `renameLab`, `deleteLab`, and `setLabBasePath` require explicit confirmation
+  and a stopped lab. Deleting a lab also deletes all of its backups.
+- All labs share the server's configured MCP bearer token. Labs isolate
+  workspace and runtime state; they are not separate authorization domains.
+
 ## Runtime Feedback
 
 When using Streamable HTTP, open the MCP GET SSE stream after initialize and keep
 it open while writing and running lab programs. Trace notifications with
 logger = "trace" may include trace(...), Lua exceptions, stack traces, and BAS
 diagnostics.
+
+The trace stream and `readRuntimeTrace` buffer are server-global. Do not claim
+that an ordinary trace message belongs to a selected lab unless the application
+itself included reliable identifying context in the message.
 
 Tool responses such as startLab and writeLabFile only prove that the request was
 accepted. They do not prove that Lua code ran correctly.
@@ -106,7 +129,8 @@ Selection rules:
 When the user asks to design or build an app:
 
 1. Use getRuntimeInfo and getLabStatus.
-2. Use createLab if the lab does not exist.
+2. Resolve the lab with `listLabs`/`selectLab`. If no lab exists, ask the user
+   for its name and call `createLab` with that exact name.
 3. Use listLabFiles and readLabFile before modifying existing files.
 4. Use writeLabFile for .lsp, .preload, static assets, and BAS app files.
 5. Open the SSE stream before running or testing.
@@ -121,8 +145,8 @@ directly with the MCP tools.
 
 ## Backup Restore
 
-- When the user asks to back up the lab without specifying an exact backup name,
-  ask what name to use before calling backupLab.
+- When the user asks to back up a lab without specifying an exact backup name,
+  identify the selected lab and ask what name to use before calling backupLab.
 - Never invent or infer a backup name from the date, lab name, task, or
   conversation.
 - The same rule applies when copyExampleToLab uses conflictAction =
