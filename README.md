@@ -153,6 +153,7 @@ the lab can continue uninterrupted.
 #### Command Line Examples
 
 ```text
+mako # Starts LSP-Claw and Xedge when using the mako.zip developer edition.
 mako -l::lsp-claw.zip # No Xedge, MCP URL http://localhost/mcp.lsp
 mako -llsp-claw::lsp-claw.zip # No Xedge, MCP URL http://localhost/lsp-claw/mcp.lsp
 mako -l::Xedge.zip -l::lsp-claw.zip # Include Xedge, MCP URL http://localhost/mcp.lsp
@@ -225,8 +226,8 @@ rejection. When an anonymous retry is unavailable or rate limited, public
 example metadata, directory iteration, and file reads switch to the same ZIP
 snapshot. The snapshot is downloaded once per server process and stored in the
 ignored runtime file `LSP-Claw-GitHub-ReadCache.zip`. Replace an invalid token
-to regain authenticated API access. GitHub write operations never use the
-public snapshot or fall back to anonymous access.
+to regain authenticated API access. The public snapshot operates in read-only
+mode.
 
 The browser configuration page validates every non-empty GitHub token with
 GitHub before saving it. A rejected token is marked invalid and GitHub's error
