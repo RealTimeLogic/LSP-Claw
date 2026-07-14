@@ -52,3 +52,6 @@ Use LSP-Claw to create a new lab named hello-lsp. Create a simple index.lsp
 page that displays "Hello from LSP-Claw" and the current server time. Start
 the lab, test the page, and give me its URL.
 ```
+
+For additional prompts, see
+[First Useful Prompt](Instructions.md#first-useful-prompt).
