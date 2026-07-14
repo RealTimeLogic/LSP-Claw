@@ -57,8 +57,8 @@ overwrite protections, and backup/restore semantics.
   not merge archive files with destination files.
 - Transfer URLs expire and work once. Prepare a new URL after expiration, use,
   or a failed request. Do not put bearer tokens into these URLs.
-- The browser setup page provides direct Download ZIP and Upload ZIP controls
-  for transfers to and from the user's file system.
+- The browser configuration page provides direct Download ZIP and Upload ZIP
+  controls for transfers to and from the user's file system.
 - To copy between two configured LSP-Claw MCP servers, call
   `prepareLabTransfer` on the source entity, then call `importLabTransfer` on
   the destination entity with the returned descriptor. Do not read individual

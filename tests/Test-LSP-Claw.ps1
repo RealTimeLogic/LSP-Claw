@@ -126,9 +126,17 @@ try {
    $origin = if ($Port -eq 80) { "http://127.0.0.1" } else { "http://127.0.0.1:$Port" }
    $script:mcpUri = "$origin/lsp-claw/mcp.lsp"
    $archiveHeaders = @{Authorization="Bearer $script:testToken"}
-   $setupPage = Invoke-WebRequest -UseBasicParsing -Uri "$origin/lsp-claw/" -SessionVariable BrowserSession
+   $rootRequest = [Net.HttpWebRequest]::Create("$origin/lsp-claw/")
+   $rootRequest.AllowAutoRedirect = $false
+   $rootResponse = $rootRequest.GetResponse()
+   try {
+      $redirectUri = [Uri]::new([Uri]"$origin/lsp-claw/",$rootResponse.Headers["Location"]).AbsoluteUri
+      if ([int]$rootResponse.StatusCode -ne 302 -or $redirectUri -ne "$origin/lsp-claw/lsp-claw-config.lsp") { throw "browser root did not redirect to the canonical configuration page" }
+   }
+   finally { $rootResponse.Dispose() }
+   $setupPage = Invoke-WebRequest -UseBasicParsing -Uri "$origin/lsp-claw/lsp-claw-config.lsp" -SessionVariable BrowserSession
    if ($setupPage.Content -notmatch "Sign in") { throw "token-protected browser page did not require login" }
-   $setupPage = Invoke-WebRequest -UseBasicParsing -Uri "$origin/lsp-claw/" -Method Post -WebSession $BrowserSession -Body @{action="login";loginToken=$script:testToken}
+   $setupPage = Invoke-WebRequest -UseBasicParsing -Uri "$origin/lsp-claw/lsp-claw-config.lsp" -Method Post -WebSession $BrowserSession -Body @{action="login";loginToken=$script:testToken}
    if ($setupPage.Content -notmatch "Lab archives" -or $setupPage.Content -notmatch "Upload and import ZIP") { throw "browser lab manager did not render" }
    $session1 = New-McpSession
    $session2 = New-McpSession
@@ -142,6 +150,7 @@ try {
 
    $runtime = Invoke-Tool $session1 "getRuntimeInfo"
    Assert-Equal $runtime.runtime.labCount 0 "getRuntimeInfo must not create a lab"
+   Assert-Equal $runtime.runtime.configuration.setupPage.path "/lsp-claw/lsp-claw-config.lsp" "getRuntimeInfo configuration page path"
    $emptyLabs = Invoke-Tool $session1 "listLabs"
    Assert-Equal $emptyLabs.data.labCount 0 "fresh server lab count"
    $needsCreation = Invoke-Tool $session1 "listLabFiles"
@@ -173,6 +182,8 @@ try {
    $null = Invoke-Tool $session2 "writeLabFile" @{path="index.html";content="LAB_TWO"}
    New-Item -ItemType Directory -Path (Join-Path $stage "lab1\empty-dir") | Out-Null
    [IO.File]::WriteAllBytes((Join-Path $stage "lab1\binary.dat"),[byte[]](0,1,2,127,128,255))
+   $knownZipMtime = [DateTime]::new(2024,5,6,7,8,10,[DateTimeKind]::Local)
+   [IO.File]::SetLastWriteTime((Join-Path $stage "lab1\binary.dat"),$knownZipMtime)
    [IO.File]::WriteAllText((Join-Path $stage "lab1\.hidden"),"hidden")
    $read1 = Invoke-Tool $session1 "readLabFile" @{path="index.html"}
    $read2 = Invoke-Tool $session2 "readLabFile" @{path="index.html"}
@@ -194,6 +205,19 @@ try {
    Invoke-WebRequest -UseBasicParsing -Uri $export.data.downloadUrl -Headers $archiveHeaders -OutFile $storedZip
    if (-not (Test-Path $storedZip) -or (Get-Item $storedZip).Length -eq 0) { throw "archive download was empty" }
    if ((Get-FileHash -Algorithm SHA256 $storedZip).Hash.ToLowerInvariant() -ne $export.data.sha256) { throw "archive SHA-256 mismatch" }
+   $storedZipFile = [IO.File]::OpenRead($storedZip)
+   try {
+      $storedArchive = [IO.Compression.ZipArchive]::new($storedZipFile,[IO.Compression.ZipArchiveMode]::Read,$false)
+      try {
+         foreach ($entry in $storedArchive.Entries) {
+            if ($entry.LastWriteTime.Year -lt 2020) { throw "archive entry $($entry.FullName) has an invalid modification date" }
+         }
+         $binaryEntry = $storedArchive.GetEntry("binary.dat")
+         if (-not $binaryEntry -or $binaryEntry.LastWriteTime.LocalDateTime -ne $knownZipMtime) { throw "archive did not preserve the lab file modification date" }
+      }
+      finally { $storedArchive.Dispose() }
+   }
+   finally { $storedZipFile.Dispose() }
    $reused = $false
    try { $null = Invoke-WebRequest -UseBasicParsing -Uri $export.data.downloadUrl -Headers $archiveHeaders } catch { $reused = $_.Exception.Response.StatusCode.value__ -eq 404 }
    if (-not $reused) { throw "archive download ticket was reusable" }

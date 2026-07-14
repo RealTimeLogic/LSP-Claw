@@ -342,6 +342,10 @@ local function normalizedSetupPath(baseUri)
    return baseUri
 end
 
+local function configurationPagePath(baseUri)
+   return normalizedSetupPath(baseUri) .. "lsp-claw-config.lsp"
+end
+
 local function requestOrigin(ctx)
    if type(ctx) ~= "table" then return nil end
    if type(ctx.serverOrigin) == "string" and ctx.serverOrigin ~= "" then return ctx.serverOrigin end
@@ -384,7 +388,7 @@ local function configurationStatus(ctx)
    if type(configurationStatusProvider) == "function" then
       status = configurationStatusProvider() or {}
    end
-   local setupPath = normalizedSetupPath(status.setupBaseUri)
+   local setupPath = configurationPagePath(status.setupBaseUri)
    local origin = requestOrigin(ctx)
    local githubTokenSet = status.githubTokenSet == true
    local mcpAuthTokenSet = status.mcpAuthTokenSet == true
@@ -416,7 +420,7 @@ local function configurationStatus(ctx)
 	 url = absoluteUrl(origin, setupPath),
 	 serverOrigin = origin,
 	 urlTemplate = "http://<mcp-server-address>" .. setupPath,
-	 guidance = "When LSP-Claw is already running, configure tokens from the browser setup page. Use setupPage.url when present; otherwise replace <mcp-server-address> in urlTemplate with the host or IP address serving this MCP app."
+	 guidance = "When LSP-Claw is already running, configure tokens from the browser configuration page. Use setupPage.url when present; otherwise replace <mcp-server-address> in urlTemplate with the host or IP address serving this MCP app."
       }
    }, warnings
 end

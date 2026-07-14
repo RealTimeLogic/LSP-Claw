@@ -39,6 +39,27 @@ local function u32(value)
       math.floor(value/0x10000)%0x100,math.floor(value/0x1000000)%0x100)
 end
 
+local function dosDateTime(mtime,fallback)
+   local value=tonumber(mtime) or tonumber(fallback) or os.time()
+   local ok,date=pcall(os.date,"*t",math.floor(value))
+   if not ok or type(date) ~= "table" then date=nil end
+   local sourceYear=date and tonumber(date.year) or nil
+   if not sourceYear or sourceYear < 1980 then
+      date={year=1980,month=1,day=1,hour=0,min=0,sec=0}
+   elseif sourceYear > 2107 then
+      date={year=2107,month=12,day=31,hour=23,min=59,sec=58}
+   end
+   local year=math.floor(tonumber(date.year) or 1980)
+   local month=math.floor(tonumber(date.month) or 1)
+   local day=math.floor(tonumber(date.day) or 1)
+   local hour=math.floor(tonumber(date.hour) or 0)
+   local minute=math.floor(tonumber(date.min) or 0)
+   local second=math.floor(tonumber(date.sec) or 0)
+   local dosTime=hour*0x800+minute*0x20+math.floor(second/2)
+   local dosDate=(year-1980)*0x200+month*0x20+day
+   return dosTime,dosDate
+end
+
 local crcTable
 local function buildCrcTable()
    local table32={}
@@ -99,7 +120,8 @@ local function sortedEntries(files,options)
          directory=directory,
          content=file.content,
          producer=file.producer,
-         source=file.source
+         source=file.source,
+         mtime=file.mtime
       }
    end
    table.sort(sorted,function(a,b) return a.path < b.path end)
@@ -140,6 +162,7 @@ local function writeInternal(files,output,options)
    options=options or {}
    local maxEntryBytes=options.maxEntryBytes or 64*1024*1024
    local maxArchiveBytes=options.maxArchiveBytes or 64*1024*1024
+   local defaultMtime=tonumber(options.mtime) or os.time()
    local central,offset,total={},0,0
    local function emit(data)
       total=total+#data
@@ -154,9 +177,10 @@ local function writeInternal(files,output,options)
       local name=entry.path..(entry.directory and "/" or "")
       assert(#name <= 65535,"ZIP entry name is too long")
       local crc,size=measure(entry,maxEntryBytes)
+      local dosTime,dosDate=dosDateTime(entry.mtime,defaultMtime)
       assert(size < 0x100000000 and offset < 0x100000000,"ZIP32 size or offset limit exceeded")
       local header=table.concat({
-         u32(0x04034B50),u16(20),u16(0),u16(0),u16(0),u16(0),
+         u32(0x04034B50),u16(20),u16(0),u16(0),u16(dosTime),u16(dosDate),
          u32(crc),u32(size),u32(size),u16(#name),u16(0),name
       })
       emit(header)
@@ -170,7 +194,7 @@ local function writeInternal(files,output,options)
       emittedCrc=bit.bxor(emittedCrc,0xFFFFFFFF)%0x100000000
       assert(emittedSize == size and emittedCrc == crc,"ZIP entry changed between reads: "..name)
       central[#central+1]=table.concat({
-         u32(0x02014B50),u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),
+         u32(0x02014B50),u16(20),u16(20),u16(0),u16(0),u16(dosTime),u16(dosDate),
          u32(crc),u32(size),u32(size),u16(#name),u16(0),u16(0),u16(0),u16(0),
          u32(entry.directory and 0x10 or 0),u32(offset),name
       })
@@ -200,5 +224,6 @@ end
 
 M._crc32=crc32
 M._normalizePath=normalizedPath
+M._dosDateTime=dosDateTime
 
 return M

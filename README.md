@@ -57,13 +57,13 @@ deletion leaves one stopped automatically routed lab, it returns to `/`.
 Explicit route choices are never changed silently.
 
 Complete labs can be downloaded or uploaded as ZIP archives from the
-authenticated browser setup page. AI agents can use `prepareLabExport` and
-`prepareLabImport` to obtain short-lived, one-time direct transfer URLs, so ZIP
-bytes do not pass through MCP JSON or model context. LSP-Claw creates fast
-stored/uncompressed ZIPs and accepts stored or compressed imports. Imports are
-fully validated and staged; they support only creation of a new named lab or
-explicitly confirmed replacement of a stopped lab, never file merging. See
-[Lab Archives](doc/Lab-Archives.md).
+authenticated browser configuration page. AI agents can use
+`prepareLabExport` and `prepareLabImport` to obtain short-lived, one-time direct
+transfer URLs, so ZIP bytes do not pass through MCP JSON or model context.
+LSP-Claw creates fast stored/uncompressed ZIPs and accepts stored or compressed
+imports. Imports are fully validated and staged; they support only creation of
+a new named lab or explicitly confirmed replacement of a stopped lab, never
+file merging. See [Lab Archives](doc/Lab-Archives.md).
 
 When the source and destination are different configured LSP-Claw MCP servers,
 the agent calls `prepareLabTransfer` on the source and `importLabTransfer` on
@@ -254,11 +254,12 @@ ignored runtime file `LSP-Claw-GitHub-ReadCache.zip`. Replace an invalid token
 to regain authenticated API access. GitHub write operations never use the
 public snapshot or fall back to anonymous access.
 
-The browser setup page validates every non-empty GitHub token with GitHub before
-saving it. A rejected token is marked invalid and GitHub's error is displayed
-under the field; neither token setting is changed. A successful save activates
-the validated GitHub token immediately, without restarting LSP-Claw. Leaving the
-GitHub field blank skips validation and clears the stored GitHub token.
+The browser configuration page validates every non-empty GitHub token with
+GitHub before saving it. A rejected token is marked invalid and GitHub's error
+is displayed under the field; neither token setting is changed. A successful
+save activates the validated GitHub token immediately, without restarting
+LSP-Claw. Leaving the GitHub field blank skips validation and clears the stored
+GitHub token.
 
 ### Mako Token Configuration
 
@@ -291,14 +292,12 @@ MCP_AUTH_TOKEN="your-mcp-auth-token"
 
 ### Web Token Configuration for Mako and Xedge
 
-LSP-Claw also includes a browser setup page for configuring tokens. This is
-optional when using Mako Server, but **required when using standalone Xedge** if
-you want to set these tokens:
+LSP-Claw also includes a browser configuration page for configuring tokens.
+This is optional when using Mako Server, but **required when using standalone
+Xedge** if you want to set these tokens:
 
 ```text
-http://localhost/
-alias:
-http://localhost/index.lsp
+http://localhost/lsp-claw-config.lsp
 ```
 
 If LSP-Claw is installed under the packaged Xedge base URL, or if you
@@ -307,13 +306,16 @@ are using the
 use:
 
 ```text
-http://localhost/lsp-claw/index.lsp
+http://localhost/lsp-claw/lsp-claw-config.lsp
 ```
 
-The setup page lets you set either token, both tokens, or neither token. Leave a
-field blank to store no value for that token. If an MCP authentication token is
-already configured, the setup page uses that token as the login token before it
-shows the token form.
+Requests to the application root or `index.lsp` redirect to the canonical
+`lsp-claw-config.lsp` page. The configuration page lets you set either token,
+both tokens, or neither token. Leave a field blank to store no value for that
+token. If an MCP authentication token is already configured, the configuration
+page uses that token as the login token before it shows the token form. Its lab
+list also provides a per-lab **Start lab** or **Stop lab** button, so the app
+runtime can be controlled without an AI agent.
 
 Tokens saved through LSP-Claw are stored encrypted using key material derived
 from the host/device. This is the preferred method for Xedge standalone systems

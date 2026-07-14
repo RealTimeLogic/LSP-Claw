@@ -227,9 +227,38 @@ function app.prepareBrowserLabExport(labName)
    return prepared
 end
 
+function app.setBrowserLabRunning(labName,running)
+   local lab,err,code=appmgr.getLab(labName)
+   if not lab then return nil,err,code end
+   if running == lab:isRunning() then
+      return {labName=lab:name(),running=running,changed=false}
+   end
+   local ok
+   if running then
+      ok,err=lab:start()
+      code="labStartFailed"
+   else
+      ok,err=lab:stop()
+      code="labStopFailed"
+   end
+   if not ok then return nil,err,code end
+   return {labName=lab:name(),running=lab:isRunning(),changed=true}
+end
+
 function app.labApiService(cmd,response)
    if not authorizeArchiveRequest(cmd) then sendJson(response,401,{ok=false,error="Unauthorized"}) return end
    if cmd:method() ~= "POST" then sendJson(response,405,{ok=false,error="Method not allowed"}) return end
+   if cmd:data("action") == "setRunning" then
+      local value=cmd:data("running")
+      if value ~= "true" and value ~= "false" then
+         sendJson(response,400,{ok=false,error="The running field must be true or false",code="invalidRunningState"})
+         return
+      end
+      local result,err,code=app.setBrowserLabRunning(cmd:data("labName"),value == "true")
+      if not result then sendJson(response,409,{ok=false,error=err,code=code}) return end
+      sendJson(response,200,{ok=true,result=result})
+      return
+   end
    if cmd:data("action") == "prepareExport" then
       local prepared,err,code=app.prepareBrowserLabExport(cmd:data("labName"))
       if not prepared then sendJson(response,409,{ok=false,error=err,code=code}) return end

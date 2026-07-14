@@ -203,6 +203,27 @@ input[type="checkbox"] {
    display: block;
 }
 
+.lab-actions {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+}
+
+.lab-operation-status:empty {
+   display: none;
+}
+
+.toggle-lab.stop {
+   color: #ff8a82;
+   border-color: rgba(216, 59, 49, .55);
+}
+
+.toggle-lab.stop:hover {
+   color: var(--white);
+   border-color: var(--red);
+   background: var(--red);
+}
+
 .archive-upload {
    margin-top: 24px;
    padding-top: 22px;
@@ -326,6 +347,11 @@ button:hover {
    }
 
    .lab-row {
+      align-items: stretch;
+      flex-direction: column;
+   }
+
+   .lab-actions {
       align-items: stretch;
       flex-direction: column;
    }

@@ -134,7 +134,7 @@ function Archive:_collectLab(lab)
          if size > limits.maxEntryBytes then return nil,"lab file exceeds size limit: "..file end
          total=total+size
          if total > limits.maxExpandedBytes then return nil,"lab exceeds expanded size limit" end
-         tinsert(files,{path=file,source={io=labIo,path=file}})
+         tinsert(files,{path=file,source={io=labIo,path=file},mtime=stat and tonumber(stat.mtime) or nil})
          local parent=path
          while parent ~= "" do
             hasChild[parent]=true
@@ -145,7 +145,8 @@ function Archive:_collectLab(lab)
          if path ~= "" then
             if not valid then return nil,"unsafe lab directory "..path..": "..depth end
             if depth > limits.maxDepth then return nil,"lab directory exceeds nesting limit: "..path end
-            dirs[path]=true
+            local stat=labIo:stat(path)
+            dirs[path]={mtime=stat and tonumber(stat.mtime) or nil}
             dirCount=dirCount+1
             local parent=path:match("^(.*)/[^/]+$") or ""
             if parent ~= "" then hasChild[parent]=true end
@@ -157,7 +158,9 @@ function Archive:_collectLab(lab)
    local empty={}
    for path in pairs(dirs) do if not hasChild[path] then tinsert(empty,path) end end
    table.sort(empty)
-   for path in pairs(dirs) do tinsert(files,{path=path,directory=true}) end
+   for path,metadata in pairs(dirs) do
+      tinsert(files,{path=path,directory=true,mtime=metadata.mtime})
+   end
    return {entries=files,fileCount=fileCount,uncompressedBytes=total,emptyDirectories=empty,labIo=labIo}
 end
 
@@ -166,17 +169,18 @@ function Archive:prepareExport(lab)
    return lab:exclusive("exportLab",function()
       local collected,err=self:_collectLab(lab)
       if not collected then return nil,err,"exportLabFailed" end
+      local createdAt=os.time()
       local manifest={
          format=formatName,
          version=formatVersion,
          exportedLabName=lab:name(),
-         createdAt=os.time(),
+         createdAt=createdAt,
          fileCount=collected.fileCount,
          uncompressedBytes=collected.uncompressedBytes,
          emptyDirectories=collected.emptyDirectories
       }
       local manifestText=ba.json.encode(manifest)
-      tinsert(collected.entries,{path=manifestName,content=manifestText})
+      tinsert(collected.entries,{path=manifestName,content=manifestText,mtime=createdAt})
       local id=ticketId()
       local path="LSP-Claw-export-"..id..".zip"
       local output
@@ -189,9 +193,10 @@ function Archive:prepareExport(lab)
          return output:write(chunk)
       end,{
          maxEntries=self.limits.maxEntries,
-         maxDepth=self.limits.maxDepth,
-         maxEntryBytes=self.limits.maxEntryBytes,
-         maxArchiveBytes=self.limits.maxArchiveBytes
+          maxDepth=self.limits.maxDepth,
+          maxEntryBytes=self.limits.maxEntryBytes,
+          maxArchiveBytes=self.limits.maxArchiveBytes,
+          mtime=createdAt
       })
       local closeOk,closeErr=output:close()
       if not info or closeOk == false then

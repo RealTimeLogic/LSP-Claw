@@ -6,9 +6,11 @@ snapshot when transferring a lab between LSP-Claw servers.
 
 ## User workflows
 
-The authenticated browser setup page lists labs and provides **Download ZIP**
-and **Upload and import ZIP** controls. The browser transfers the file directly
-between the user's file system and LSP-Claw.
+The authenticated browser configuration page, `lsp-claw-config.lsp`, lists
+labs and provides **Start lab** or **Stop lab**, **Download ZIP**, and **Upload
+and import ZIP** controls. Start and stop operate on the selected row and update
+its displayed runtime state without requiring an MCP client. The browser
+transfers archive files directly between the user's file system and LSP-Claw.
 
 AI agents use two MCP tools:
 
@@ -30,6 +32,11 @@ LSP-Claw-generated ZIPs use ZIP32 method 0: entries are stored without
 compression. This avoids compression work on embedded systems and permits
 chunked BAS IO output without buffering the archive in Lua memory. Imports use
 ZipIo and accept both stored and compressed ZIP entries.
+
+Exported entries use their BAS IO `mtime` in the ZIP DOS date/time fields. The
+generated manifest uses the export time, which is also the fallback for an IO
+that does not provide a usable modification time. ZIP's DOS timestamp format
+has two-second resolution and represents local time.
 
 Every archive contains `.lsp-claw-lab.json`:
 

@@ -66,7 +66,7 @@ resources, prompts, lab behavior, and agent-facing instructions.
 - MCP Streamable HTTP transport configuration.
 - Origin and bearer-token authorization.
 - Short-lived archive upload/download services using the same authentication
-  boundary as the setup page and MCP endpoint.
+  boundary as the configuration page and MCP endpoint.
 
 ### `www/.lua/lspclaw.lua`
 
@@ -347,25 +347,26 @@ LSP-Claw has two optional tokens:
 
 Under Mako, tokens can come from environment variables or `mako.conf`.
 
-Both Mako and Xedge can also use the browser setup page. The setup page calls
+Both Mako and Xedge can also use the browser configuration page. The page calls
 `app.getSetTokens(githubToken, authToken)`. Tokens saved this way are stored
 encrypted using key material derived from `ba.tpm.uniquekey`.
 
 `getRuntimeInfo` reports whether each token is configured, but never returns
-the token value. It also returns a setup page URL template derived from
-`dir:baseuri()`:
+the token value. It also returns a configuration page URL template derived from
+`dir:baseuri()`. The normalized base URI ends with `/`:
 
 ```text
-http://<mcp-server-address><base-uri>
+http://<mcp-server-address><base-uri>lsp-claw-config.lsp
 ```
 
-For example, if `dir:baseuri()` is empty, the setup page is:
+For example, if `dir:baseuri()` is empty, the configuration page is:
 
 ```text
-http://<mcp-server-address>/
+http://<mcp-server-address>/lsp-claw-config.lsp
 ```
 
-An AI agent should present this setup URL to the human when either token is
+The application root and `index.lsp` redirect to this canonical page. An AI
+agent should present this configuration URL to the human when either token is
 missing. It should explain that a missing GitHub token can cause unauthenticated
 GitHub rate limits, while a missing MCP auth token means any client that can
 reach the endpoint can use the MCP server.
