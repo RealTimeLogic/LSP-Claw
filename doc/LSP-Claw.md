@@ -21,7 +21,9 @@ Related documents:
   creation, copying, backup, clearing, start, and stop operations.
 - [Lab-Archives.md](Lab-Archives.md) defines complete lab ZIP import/export,
   validation limits, transfer tickets, and staged replacement.
-- [README.md](../README.md) is the user-facing tutorial and setup guide.
+- [Instructions.md](../Instructions.md) is the detailed user tutorial and setup
+  guide; [README.md](../README.md) is the short Mako Developer Edition quick
+  start.
 
 ## Runtime Structure
 
