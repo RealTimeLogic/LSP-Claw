@@ -93,7 +93,10 @@ Important behavior:
 ### `www/.lua/fastmcp/*`
 
 FastMCP provides the MCP engine and HTTP transport. See [FastMCP.md](FastMCP.md)
-for the design details.
+for the current API, schema subset, limits, and transport contract. LSP-Claw
+explicitly trusts forwarded headers because it is commonly routed as an Xedge
+application; its front-end proxy must sanitize those headers. FastMCP ignores
+forwarded headers by default in other applications.
 
 LSP-Claw uses the Streamable HTTP transport because runtime trace notifications
 are important to the AI workflow.
@@ -382,3 +385,8 @@ A complete MCP smoke test should verify:
 The latest full endpoint test used `mako -l::www`, copied `AJAX/www`, verified
 the lab contained root files such as `.config` and `index.lsp`, started the
 lab, and confirmed `GET /` returned the AJAX example page.
+
+The repeatable framework and packaged regressions are
+`tests/fastmcp/Test-FastMCP.ps1` and `tests/Test-LSP-Claw.ps1`. The packaged
+test initializes a stateful session, lists tools, calls `getRuntimeInfo`,
+checks its origin-aware browser URL, deletes the session, and stops Mako.

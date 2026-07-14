@@ -100,6 +100,17 @@ cd www
 zip -D -q -u -r -9 ../lsp-claw.zip .
 ```
 
+Before packaging a modified checkout, run both regressions from the repository
+root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/fastmcp/Test-FastMCP.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-LSP-Claw.ps1
+```
+
+The first isolates generic FastMCP. The second starts the complete LSP-Claw
+application and verifies a real Streamable HTTP session.
+
 ## Running LSP-Claw
 
 ### Using Mako with or without Xedge

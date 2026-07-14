@@ -1,0 +1,182 @@
+local x = mako or xedge
+assert(x, "FastMCP tests require Mako or Xedge")
+x.createloader(io)
+
+local FastMCP = require "fastmcp.engine"
+local Dispatcher = require "fastmcp.dispatcher"
+local Http = require "fastmcp.http"
+local Schema = require "fastmcp.schema"
+local passed = 0
+
+local function check(condition, message)
+   if not condition then error("FAIL: " .. tostring(message), 2) end
+   passed = passed + 1
+end
+
+local function equal(actual, expected, message)
+   check(actual == expected, (message or "values differ") .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
+end
+
+-- Constructors, schema defaults, nested validation, and caller immutability.
+local mcp = FastMCP.create { name="Standalone", strictSchemas=true }
+check(FastMCP.create { name="Create" }, "create constructor")
+equal(mcp.version, "0.2.0", "framework version")
+local input = { nested={ count=2 } }
+mcp:tool("validate", {
+   inputSchema={ type="object", properties={
+      name={ type="string", default="default-name", minLength=3 },
+      nested={ type="object", properties={ count={ type="integer", minimum=1, maximum=3 } }, required={"count"}, additionalProperties=false }
+   }, required={"nested"}, additionalProperties=false },
+   outputSchema={ type="object", properties={ ok={type="boolean"} }, required={"ok"}, additionalProperties=false }
+}, function(args)
+   equal(args.name, "default-name", "default applied")
+   return { ok=true }
+end)
+local result = mcp:callTool("validate", input)
+check(not FastMCP.isError(result), "valid tool call: " .. tostring(result and result.message) .. " / " .. tostring(result and result.details and result.details.field) .. " / " .. tostring(result and result.details and result.details.received))
+check(input.name == nil, "input not mutated")
+local bad = mcp:callTool("validate", { nested={count=4}, extra=true })
+check(FastMCP.isError(bad), "invalid tool input rejected")
+equal(bad.details.code, "maximum", "validation error code")
+
+local optional, optionalErr = Schema.validate({
+   type="object",
+   properties={ optionalName={type="string"} },
+   additionalProperties=false
+}, {}, {strict=true})
+check(optional and not optionalErr and optional.optionalName == nil, "absent optional typed property accepted")
+
+local validArray, validArrayErr = Schema.validate({type="array",items={type="string"}}, {"one","two"}, {strict=true})
+check(validArray and not validArrayErr and #validArray == 2, "array shape accepted")
+local objectAsArray, objectAsArrayErr = Schema.validate({type="array",items={type="string"}}, {unexpected="object"}, {strict=true})
+check(objectAsArray == nil and objectAsArrayErr.code == "type", "object shape rejected as array")
+local arrayAsObject, arrayAsObjectErr = Schema.validate({type="object",properties={},additionalProperties=false}, {"unexpected"}, {strict=true})
+check(arrayAsObject == nil and arrayAsObjectErr.code == "type", "array shape rejected as object")
+local sparseArray, sparseArrayErr = Schema.validate({type="array",items={type="string"}}, {[1]="one",[3]="three"}, {strict=true})
+check(sparseArray == nil and sparseArrayErr.code == "type", "sparse array rejected")
+local mixedTable, mixedTableErr = Schema.validate({type="array",items={type="string"}}, {[1]="one",name="mixed"}, {strict=true})
+check(mixedTable == nil and mixedTableErr.code == "type", "mixed table rejected")
+local invalidKeys, invalidKeysErr = Schema.validate({type="object",properties={}}, {[true]="invalid"}, {strict=true})
+check(invalidKeys == nil and invalidKeysErr.code == "type", "invalid table key rejected")
+
+mcp:tool("badOutput", { inputSchema={type="object"}, outputSchema={type="object",properties={ok={type="boolean"}},required={"ok"}} }, function() return {ok="yes"} end)
+local output = mcp:callTool("badOutput", {})
+check(FastMCP.isError(output), "invalid output rejected")
+equal(output.details.code, "outputValidation", "output validation code")
+
+-- Prompt and URI-template validation/decoding.
+mcp:prompt("hello", { arguments={ who={type="string",required=true,minLength=2} } }, function(args) return "Hello " .. args.who end)
+local prompt = mcp:getPrompt("hello", {who="Lua"})
+equal(prompt, "Hello Lua", "prompt arguments")
+check(FastMCP.isProtocolError(mcp:getPrompt("hello", {})), "missing prompt argument")
+mcp:resourceTemplate("item:///{name}", { parameters={name={type="string",required=true,minLength=2}} }, function(params) return params.name end)
+local decoded = mcp:readResource("item:///hello%20world")
+equal(decoded, "hello world", "template percent decoding")
+check(FastMCP.isError(mcp:readResource("item:///%2F")), "encoded slash rejected")
+
+-- Removal/re-registration does not duplicate list order.
+mcp:tool("again", {}, function() return true end)
+check(mcp:remove("tool", "again"), "remove tool")
+mcp:tool("again", {}, function() return true end)
+local occurrences = 0
+for _, tool in ipairs(mcp:listTools()) do if tool.name == "again" then occurrences = occurrences + 1 end end
+equal(occurrences, 1, "re-registration order")
+check(mcp:capabilities().logging == nil, "logging not advertised")
+check(mcp:capabilities().tools.listChanged == false, "list changes not advertised")
+
+-- Serializer rejects values that cannot be represented faithfully.
+equal(Dispatcher.jsonEncode(FastMCP.array()), "[]", "marked empty array")
+equal(Dispatcher.jsonEncode({}), "{}", "empty object")
+local cycle = {}; cycle.self = cycle
+local encodeOk, encoded, encodeErr = FastMCP.pcall(Dispatcher.jsonEncode, cycle)
+check(encodeOk and encoded == nil and encodeErr, "cycle returned nil and error without throwing")
+encoded, encodeErr = Dispatcher.jsonEncode(0/0)
+check(encoded == nil and encodeErr, "NaN returned nil and error")
+encoded, encodeErr = Dispatcher.jsonEncode({value=function() end})
+check(encoded == nil and encodeErr, "function returned nil and error")
+encoded, encodeErr = Dispatcher.jsonEncode({[2]="map"})
+check(encoded == nil and encodeErr, "numeric map key returned nil and error")
+
+local cycleTool = {}; cycleTool.self = cycleTool
+mcp:tool("cycleResult", {}, function() return cycleTool end)
+local dispatchOk, dispatchResult = FastMCP.pcall(Dispatcher.dispatch, mcp, {
+   jsonrpc="2.0", id=77, method="tools/call", params={name="cycleResult", arguments={}}
+})
+check(dispatchOk and dispatchResult.error and dispatchResult.error.code == -32603,
+      "dispatcher converts serializer failure to JSON-RPC error")
+
+-- Deterministic session capacity and expiration.
+local now, sid = 100, 0
+local transport = Http.streamable(mcp, {
+   clock=function() return now end,
+   sessionIdFactory=function() sid=sid+1; return "test-" .. sid end,
+   maxSessions=2, maxStreamsPerSession=1,
+   sessionIdleTimeoutSeconds=10, sessionMaxLifetimeSeconds=30
+})
+local s1 = assert(transport:createSession("2025-11-25", {}))
+local s2 = assert(transport:createSession("2025-11-25", {}))
+local s3, capacityErr = transport:createSession("2025-11-25", {})
+check(s3 == nil and capacityErr, "session capacity enforced")
+now = 110
+equal(transport:cleanupSessions(now), 2, "idle sessions expired")
+check(transport.sessions[s1.id] == nil and transport.sessions[s2.id] == nil, "expired sessions removed")
+check(not FastMCP.pcall(Http.streamable, mcp, {resumable=true}), "false resumability rejected")
+
+-- Compatibility HTTP adapter: media type, declared/actual body bounds, and proxy trust.
+local function command(method, headers, chunks)
+   local cmd = { status=0, responseHeaders={}, output="", headers=headers or {}, chunks=chunks or {} }
+   function cmd:method() return method end
+   function cmd:header(name)
+      local wanted = string.lower(name)
+      for k, v in pairs(self.headers) do if string.lower(k) == wanted then return v end end
+   end
+   function cmd:setheader(name, value) self.responseHeaders[name] = tostring(value) end
+   function cmd:setstatus(value) self.status = value end
+   function cmd:reset() self.output=""; self.responseHeaders={} end
+   function cmd:write(value) self.output = self.output .. value; return true end
+   function cmd:rawrdr()
+      local i = 0
+      return function() i=i+1; return self.chunks[i] end
+   end
+   return cmd
+end
+
+local initialize = Dispatcher.jsonEncode({jsonrpc="2.0",id=1,method="initialize",params={protocolVersion="2025-11-25"}})
+local wrongType = command("POST", { ["Content-Type"]="text/plain" }, {initialize})
+Http.handle(mcp, wrongType)
+equal(wrongType.status, 415, "content type enforced")
+local declaredLarge = command("POST", { ["Content-Type"]="application/json", ["Content-Length"]="999" }, {initialize})
+Http.handle(mcp, declaredLarge, {maxRequestBodyBytes=10})
+equal(declaredLarge.status, 413, "declared request limit")
+local actualLarge = command("POST", { ["Content-Type"]="application/json" }, {"123456", "789012"})
+Http.handle(mcp, actualLarge, {maxRequestBodyBytes=10})
+equal(actualLarge.status, 413, "actual request limit")
+local direct = command("POST", { ["Content-Type"]="application/json", Host="direct.example", ["X-Forwarded-Host"]="spoof.example", ["X-Forwarded-Proto"]="https" }, {initialize})
+Http.handle(mcp, direct)
+local directJson = assert(ba.json.decode(direct.output))
+equal(directJson.result._meta.serverOrigin, "http://direct.example", "forwarded headers ignored by default")
+local trusted = command("POST", { ["Content-Type"]="application/json", Host="direct.example", ["X-Forwarded-Host"]="proxy.example", ["X-Forwarded-Proto"]="https" }, {initialize})
+Http.handle(mcp, trusted, {trustForwardedHeaders=true})
+local trustedJson = assert(ba.json.decode(trusted.output))
+equal(trustedJson.result._meta.serverOrigin, "https://proxy.example", "trusted forwarded origin")
+local smallResponse = command("POST", { ["Content-Type"]="application/json", Host="direct.example" }, {initialize})
+Http.handle(mcp, smallResponse, {maxResponseBytes=10})
+equal(smallResponse.status, 500, "response bound enforced")
+
+mcp:tool("badSerialization", {}, function()
+   return FastMCP.toolResult {
+      content={"unserializable structured content"},
+      structuredContent={callback=function() end}
+   }
+end)
+local badSerializationRequest = assert(Dispatcher.jsonEncode({
+   jsonrpc="2.0", id=78, method="tools/call", params={name="badSerialization", arguments={}}
+}))
+local badSerializationResponse = command("POST", { ["Content-Type"]="application/json" }, {badSerializationRequest})
+Http.handle(mcp, badSerializationResponse)
+equal(badSerializationResponse.status, 500, "serializer failure returns HTTP 500")
+local badSerializationJson = assert(ba.json.decode(badSerializationResponse.output))
+equal(badSerializationJson.error.code, -32603, "serializer failure returns JSON-RPC error")
+
+trace("FAST_MCP_TEST_PASS", passed)
+if mako and mako.exit then mako.exit(0) end

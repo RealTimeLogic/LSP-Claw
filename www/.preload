@@ -64,7 +64,7 @@ local ghio,info = require"GitHubIo".create{
 
 local appmgr=require"appmgr"
 
-local mcp = require"fastmcp.engine" {
+local mcp = require"fastmcp.engine".create {
    name = "BAS Example Workspace Assistant",
    version = "0.2.0",
    instructions = rw.file(io,".info/instructions.md")
@@ -175,6 +175,16 @@ transport = Http.streamable(mcp, {
    protocolVersion = "2025-11-25",
    requireStrictAccept = false,
    allowNonSseGet = true,
+   -- LSP-Claw is commonly installed behind the Xedge application router.
+   -- FastMCP itself ignores forwarded headers unless this is explicitly set.
+   trustForwardedHeaders = true,
+   maxRequestBodyBytes = 1024 * 1024,
+   maxResponseBytes = 4 * 1024 * 1024,
+   maxNotificationBytes = 256 * 1024,
+   maxSessions = 16,
+   maxStreamsPerSession = 2,
+   sessionIdleTimeoutSeconds = 30 * 60,
+   sessionMaxLifetimeSeconds = 8 * 60 * 60,
    authorizeOrigin = authorizeRequest,
    onStreamOpen = function(session, stream, self)
       attachTraceStream()

@@ -26,18 +26,25 @@ local function jsonEncodeValue(value, seen)
    local valueType = type(value)
    if value == nil or value == ba.json.null then return "null" end
    if valueType == "string" then return ba.json.encodestr(value) end
-   if valueType == "number" then return tostring(value) end
+   if valueType == "number" then
+      if value ~= value or value == math.huge or value == -math.huge then return nil, "non-finite number cannot be encoded" end
+      return tostring(value)
+   end
    if valueType == "boolean" then return value and "true" or "false" end
-   if valueType ~= "table" then return "null" end
+   if valueType ~= "table" then return nil, "unsupported JSON value type: " .. valueType end
 
    seen = seen or {}
-   if seen[value] then return "null" end
+   if seen[value] then return nil, "cyclic table cannot be encoded" end
    seen[value] = true
 
    local isArray, max = arrayInfo(value)
    local out = {}
    if isArray then
-      for i = 1, max do out[#out + 1] = jsonEncodeValue(rawget(value, i), seen) end
+      for i = 1, max do
+         local encoded, err = jsonEncodeValue(rawget(value, i), seen)
+         if not encoded then seen[value] = nil; return nil, err end
+         out[#out + 1] = encoded
+      end
       seen[value] = nil
       return "[" .. table.concat(out, ",") .. "]"
    end
@@ -49,18 +56,19 @@ local function jsonEncodeValue(value, seen)
    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
    for _, key in ipairs(keys) do
       local keyType = type(key)
-      if keyType == "string" or keyType == "number" then
-	 out[#out + 1] = ba.json.encodestr(tostring(key)) .. ":" .. jsonEncodeValue(value[key], seen)
-      end
+      if keyType ~= "string" then seen[value] = nil; return nil, "JSON object keys must be strings" end
+      local encoded, err = jsonEncodeValue(value[key], seen)
+      if not encoded then seen[value] = nil; return nil, err end
+      out[#out + 1] = ba.json.encodestr(key) .. ":" .. encoded
    end
    seen[value] = nil
    return "{" .. table.concat(out, ",") .. "}"
 end
 
 local function jsonEncode(value)
-   local ok, encoded = pcall(jsonEncodeValue, value)
-   if ok then return encoded end
-   return tostring(value)
+   local ok, encoded, err = pcall(jsonEncodeValue, value)
+   if not ok then return nil, encoded end
+   return encoded, err
 end
 
 local function jsonRpcError(id, code, message, data)
@@ -102,7 +110,9 @@ local function contentItem(item)
       return { type = "text", text = tostring(item) }
    end
    if item.type == "json" then
-      return { type = "text", text = jsonEncode(item.json or item.value or {}) }
+      local encoded, err = jsonEncode(item.json or item.value or {})
+      if not encoded then return nil, err end
+      return { type = "text", text = encoded }
    end
    return stripMarker(item)
 end
@@ -113,7 +123,9 @@ local function contentArray(content)
       return FastMCP.array{ { type = "text", text = tostring(content) } }
    end
    for _, item in ipairs(content) do
-      out[#out + 1] = contentItem(item)
+      local converted, err = contentItem(item)
+      if not converted then return nil, err end
+      out[#out + 1] = converted
    end
    return out
 end
@@ -132,8 +144,10 @@ function Dispatcher.toMcpToolResult(value)
       return result
    end
    if FastMCP.isToolResult(value) then
+      local content, err = contentArray(value.content or {})
+      if not content then return nil, err end
       local result = {
-	 content = contentArray(value.content or {}),
+	 content = content,
 	 structuredContent = value.structuredContent,
 	 isError = value.isError == true,
 	 _meta = value.meta
@@ -149,9 +163,11 @@ function Dispatcher.toMcpToolResult(value)
       }
    end
    if type(value) == "table" then
+      local encoded, err = jsonEncode(value)
+      if not encoded then return nil, err end
       return {
 	 content = FastMCP.array{
-	    { type = "text", text = jsonEncode(value) }
+	    { type = "text", text = encoded }
 	 },
 	 structuredContent = value,
 	 isError = false
@@ -182,7 +198,9 @@ local function contentToResourceEntry(item, uri, defaultMimeType)
    elseif item.text ~= nil then
       entry.text = tostring(item.text)
    elseif type(item.value) == "table" then
-      entry.text = jsonEncode(item.value)
+      local encoded, err = jsonEncode(item.value)
+      if not encoded then return nil, err end
+      entry.text = encoded
       entry.mimeType = item.mimeType or defaultMimeType or "application/json"
    elseif item.value ~= nil then
       entry.text = tostring(item.value)
@@ -200,24 +218,30 @@ function Dispatcher.toMcpResourceResult(value, uri, defaultMimeType)
    if FastMCP.isResourceResult(value) then
       local result = { contents = FastMCP.array(), _meta = value.meta }
       for _, item in ipairs(value.contents or {}) do
-	 result.contents[#result.contents + 1] = contentToResourceEntry(item, uri, defaultMimeType)
+	 local entry, err = contentToResourceEntry(item, uri, defaultMimeType)
+	 if not entry then return nil, err end
+	 result.contents[#result.contents + 1] = entry
       end
       return result
    end
    if FastMCP.isResourceContent(value) then
+      local entry, err = contentToResourceEntry(value, uri, value.mimeType or defaultMimeType)
+      if not entry then return nil, err end
       return {
 	 contents = FastMCP.array{
-	    contentToResourceEntry(value, uri, value.mimeType or defaultMimeType)
+	    entry
 	 }
       }
    end
    if type(value) == "table" then
+      local encoded, err = jsonEncode(value)
+      if not encoded then return nil, err end
       return {
 	 contents = FastMCP.array{
 	    {
 	       uri = uri,
 	       mimeType = defaultMimeType or "application/json",
-	       text = jsonEncode(value)
+	       text = encoded
 	    }
 	 }
       }
@@ -296,6 +320,11 @@ function Dispatcher.toMcpPromptResult(value, prompt)
    }
 end
 
+local function serializedResult(result, err)
+   if result ~= nil then return result end
+   return FastMCP.protocolError(-32603, "Response serialization failed", tostring(err))
+end
+
 local function dispatchRequestProt(mcp, msg, ctx)
    local method = msg.method
    local params = msg.params or {}
@@ -310,7 +339,7 @@ local function dispatchRequestProt(mcp, msg, ctx)
    elseif method == "tools/list" then
       return { tools = mcp:listTools(ctx) }
    elseif method == "tools/call" then
-      return Dispatcher.toMcpToolResult(mcp:callTool(params.name, params.arguments or {}, ctx))
+      return serializedResult(Dispatcher.toMcpToolResult(mcp:callTool(params.name, params.arguments or {}, ctx)))
    elseif method == "resources/list" then
       return { resources = mcp:listResources(ctx) }
    elseif method == "resources/templates/list" then
@@ -318,7 +347,7 @@ local function dispatchRequestProt(mcp, msg, ctx)
    elseif method == "resources/read" then
       local value, component = mcp:readResource(params.uri, ctx)
       local mimeType = component and component.mimeType or nil
-      return Dispatcher.toMcpResourceResult(value, params.uri, mimeType)
+      return serializedResult(Dispatcher.toMcpResourceResult(value, params.uri, mimeType))
    elseif method == "prompts/list" then
       return { prompts = mcp:listPrompts(ctx) }
    elseif method == "prompts/get" then

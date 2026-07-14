@@ -1,7 +1,8 @@
 local FastMCP = {}
 FastMCP.__index = FastMCP
+local Schema = require "fastmcp.schema"
 
-FastMCP.VERSION = "0.1.0"
+FastMCP.VERSION = "0.2.0"
 FastMCP.protocolVersionDefault = "2025-11-25"
 FastMCP.supportedProtocolVersions = {
    ["2025-11-25"] = true,
@@ -33,7 +34,10 @@ local function mark(kind, value)
 end
 
 local function errorHandler(err)
-   tracep(false,9,"ERROR:", err,"\n",debug.traceback("STACK TRACE:", 2))
+   local message = tostring(err) .. "\n" .. debug.traceback("STACK TRACE:", 2)
+   if type(tracep) == "function" then tracep(false,9,"ERROR:",message)
+   elseif type(trace) == "function" then trace("ERROR:",message)
+   elseif type(print) == "function" then print("ERROR:",message) end
    return err
 end
 
@@ -60,14 +64,12 @@ end
 
 function FastMCP.toolResult(result)
    result = result or {}
-   result.structuredContent = result.structuredContent or result.structuredContent
    result.meta = result.meta or result._meta
    return mark("toolResult", result)
 end
 
 function FastMCP.resourceContent(content)
    content = content or {}
-   content.mimeType = content.mimeType or content.mimeType
    content.meta = content.meta or content._meta
    return mark("resourceContent", content)
 end
@@ -176,6 +178,7 @@ function FastMCP.create(options)
    self.authorize = options.authorize
    self.onDuplicate = options.onDuplicate or "replace"
    self.experimentalCapabilities = options.experimentalCapabilities or {}
+   self.strictSchemas = options.strictSchemas ~= false
 
    self.tools = {}
    self.toolOrder = {}
@@ -186,8 +189,6 @@ function FastMCP.create(options)
    self.prompts = {}
    self.promptOrder = {}
    self.loggingLevel = "info"
-   self.sessions = {}
-
    return self
 end
 
@@ -212,24 +213,29 @@ function FastMCP:tool(name, options, handler)
    assert(type(options) == "table", "tool options required")
    assert(type(handler) == "function", "tool handler required")
 
+   local inputSchema = options.inputSchema or options.parameters or {
+      type = "object", properties = {}, additionalProperties = false
+   }
+   local ok, schemaErr = Schema.check(inputSchema, "tool " .. name .. " inputSchema")
+   assert(ok, schemaErr)
+   if options.outputSchema then
+      ok, schemaErr = Schema.check(options.outputSchema, "tool " .. name .. " outputSchema")
+      assert(ok, schemaErr)
+   end
    local component = {
       kind = "tool",
       name = name,
       title = options.title,
       description = options.description,
-      inputSchema = options.inputSchema or options.parameters or {
-	 type = "object",
-	 properties = {},
-	 additionalProperties = false
-      },
-      outputSchema = options.outputSchema or options.outputSchema,
+      inputSchema = inputSchema,
+      outputSchema = options.outputSchema,
       tags = options.tags or {},
       meta = mergeMeta(options),
       annotations = options.annotations,
       icons = options.icons,
       execution = options.execution,
       enabled = componentEnabled(self, options),
-      timeoutMs = options.timeoutMs or options.timeoutMs,
+      timeoutMs = options.timeoutMs,
       authorize = options.authorize or options.auth,
       handler = handler
    }
@@ -251,7 +257,7 @@ function FastMCP:resource(uri, options, handlerOrValue)
       name = options.name or uri,
       title = options.title,
       description = options.description,
-      mimeType = options.mimeType or options.mimeType or "text/plain",
+      mimeType = options.mimeType or "text/plain",
       tags = options.tags or {},
       meta = mergeMeta(options),
       annotations = options.annotations,
@@ -280,7 +286,7 @@ function FastMCP:resourceTemplate(uriTemplate, options, handler)
       name = options.name or uriTemplate,
       title = options.title,
       description = options.description,
-      mimeType = options.mimeType or options.mimeType or "text/plain",
+      mimeType = options.mimeType or "text/plain",
       parameters = options.parameters or {},
       tags = options.tags or {},
       meta = mergeMeta(options),
@@ -371,13 +377,32 @@ function FastMCP:callTool(name, arguments, ctx)
    if not self:isAuthorized(tool, ctx) then
       return FastMCP.protocolError(-32001, "Unauthorized")
    end
-   local ok, result = pcall(tool.handler, arguments or {}, ctx or {})
+   local checked, validationErr = Schema.validate(tool.inputSchema, arguments or {}, { strict = self.strictSchemas })
+   if validationErr then return FastMCP.error("Invalid tool arguments", validationErr) end
+   local ok, result = pcall(tool.handler, checked, ctx or {})
    if not ok then
       return FastMCP.error("Error calling tool " .. tostring(name) .. ": " .. tostring(result), {
 			      code = "toolError"
 			   })
    end
+   if tool.outputSchema and not FastMCP.isError(result) and not FastMCP.isProtocolError(result) then
+      local output = FastMCP.isToolResult(result) and result.structuredContent or result
+      local _, outputErr = Schema.validate(tool.outputSchema, output, { strict = self.strictSchemas })
+      if outputErr then
+         outputErr.code = "outputValidation"
+         return FastMCP.error("Tool output does not match outputSchema", outputErr)
+      end
+   end
    return result
+end
+
+local function percentDecode(value)
+   if value:find("%%[^%x]") or value:find("%%$", 1, false) or value:find("%%[%x]$", 1, false) then
+      return nil, "invalidPercentEncoding"
+   end
+   local decoded = value:gsub("%%(%x%x)", function(hex) return string.char(tonumber(hex, 16)) end)
+   if decoded:find("/", 1, true) then return nil, "encodedSlash" end
+   return decoded
 end
 
 function FastMCP:listResources(ctx)
@@ -408,9 +433,18 @@ function FastMCP:findResourceTemplate(uri, ctx)
 	 if #captures > 0 then
 	    local params = {}
 	    for i, name in ipairs(tmpl.paramNames) do
-	       params[name] = captures[i]
+	       local decoded, decodeErr = percentDecode(captures[i])
+	       if not decoded then return tmpl, nil, FastMCP.error("Invalid resource-template parameter", { code=decodeErr, field=name }) end
+	       params[name] = decoded
 	    end
-	    return tmpl, params
+	    local properties, required = {}, {}
+	    for name, def in pairs(tmpl.parameters or {}) do
+	       properties[name] = def
+	       if def.required == true then required[#required + 1] = name end
+	    end
+	    local checked, validationErr = Schema.validate({ type="object", properties=properties, required=required, additionalProperties=false }, params, { strict=self.strictSchemas })
+	    if validationErr then return tmpl, nil, FastMCP.error("Invalid resource-template parameter", validationErr) end
+	    return tmpl, checked
 	 end
       end
    end
@@ -433,8 +467,9 @@ function FastMCP:readResource(uri, ctx)
       return res.value, res
    end
 
-   local tmpl, params = self:findResourceTemplate(uri, ctx)
+   local tmpl, params, templateErr = self:findResourceTemplate(uri, ctx)
    if tmpl then
+      if templateErr then return templateErr, tmpl end
       local ok, value = pcall(tmpl.handler, params, ctx or {})
       if not ok then
 	 return FastMCP.protocolError(-32603, "Error reading resource template: " .. tostring(value))
@@ -513,7 +548,16 @@ function FastMCP:getPrompt(name, arguments, ctx)
    if not self:isAuthorized(prompt, ctx) then
       return FastMCP.protocolError(-32001, "Unauthorized")
    end
-   local ok, result = pcall(prompt.handler, arguments or {}, ctx or {})
+   local properties, required = {}, {}
+   for argName, def in pairs(prompt.arguments or {}) do
+      properties[argName] = shallowCopy(def)
+      properties[argName].required = nil
+      properties[argName].type = properties[argName].type or "string"
+      if def.required == true then required[#required + 1] = argName end
+   end
+   local checked, validationErr = Schema.validate({ type="object", properties=properties, required=required, additionalProperties=false }, arguments or {}, { strict=self.strictSchemas })
+   if validationErr then return FastMCP.protocolError(-32602, "Invalid prompt arguments", validationErr) end
+   local ok, result = pcall(prompt.handler, checked, ctx or {})
    if not ok then
       return FastMCP.protocolError(-32603, "Error getting prompt: " .. tostring(result))
    end
@@ -526,6 +570,13 @@ local function mapForKind(self, kind)
    if kind == "resourceTemplate" or kind == "resourceTemplates" then return self.resourceTemplates end
    if kind == "prompt" or kind == "prompts" then return self.prompts end
    return nil
+end
+
+local function orderForKind(self, kind)
+   if kind == "tool" or kind == "tools" then return self.toolOrder end
+   if kind == "resource" or kind == "resources" then return self.resourceOrder end
+   if kind == "resourceTemplate" or kind == "resourceTemplates" then return self.resourceTemplateOrder end
+   if kind == "prompt" or kind == "prompts" then return self.promptOrder end
 end
 
 function FastMCP:enable(kind, id)
@@ -542,18 +593,22 @@ end
 
 function FastMCP:remove(kind, id)
    local map = mapForKind(self, kind)
-   if map and map[id] then map[id] = nil; return true end
+   if map and map[id] then
+      map[id] = nil
+      local order = orderForKind(self, kind)
+      for i, value in ipairs(order) do if value == id then table.remove(order, i); break end end
+      return true
+   end
    return false
 end
 
 function FastMCP:capabilities()
    local caps = {}
-   if next(self.tools) ~= nil then caps.tools = { listChanged = true } end
+   if next(self.tools) ~= nil then caps.tools = { listChanged = false } end
    if next(self.resources) ~= nil or next(self.resourceTemplates) ~= nil then
-      caps.resources = { listChanged = true }
+      caps.resources = { listChanged = false }
    end
-   if next(self.prompts) ~= nil then caps.prompts = { listChanged = true } end
-   caps.logging = {}
+   if next(self.prompts) ~= nil then caps.prompts = { listChanged = false } end
    for k, v in pairs(self.experimentalCapabilities) do caps[k] = v end
    return caps
 end
@@ -588,12 +643,8 @@ function FastMCP:initializeResult(params, ctx)
    return result
 end
 
--- Has cap logging, but not implemented
 function FastMCP:setLoggingLevel(level)
-   self.loggingLevel = tostring(level or "info")
-   return {}
+   return FastMCP.protocolError(-32601, "Logging is not implemented")
 end
 
-return setmetatable(FastMCP, {
-   __call = function(_,options) return FastMCP.create(options) end
-})
+return FastMCP
