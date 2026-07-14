@@ -43,6 +43,23 @@ overwrite protections, and backup/restore semantics.
 - All labs share the server's configured MCP bearer token. Labs isolate
   workspace and runtime state; they are not separate authorization domains.
 
+## Complete Lab Archives
+
+- Use `prepareLabExport` when the user asks to copy or extract a complete lab.
+  Download the returned one-time URL directly to the user's requested path;
+  never request or relay ZIP bytes through MCP text or model context.
+- Use `prepareLabImport` for a local ZIP. POST the raw ZIP directly to the
+  returned one-time URL as `application/zip`. A locally prepared ZIP may be
+  stored or compressed.
+- Import requires a user-provided destination lab name and `conflictAction` of
+  `createNew` or `replace`. Never infer the destination name.
+- `replace` requires explicit user confirmation and a stopped lab. Import does
+  not merge archive files with destination files.
+- Transfer URLs expire and work once. Prepare a new URL after expiration, use,
+  or a failed request. Do not put bearer tokens into these URLs.
+- The browser setup page provides direct Download ZIP and Upload ZIP controls
+  for transfers to and from the user's file system.
+
 ## Runtime Feedback
 
 When using Streamable HTTP, open the MCP GET SSE stream after initialize and keep

@@ -55,6 +55,15 @@ Lab URLs are direct: a lab with base path `lab1` runs at `/lab1/`, not under a
 an automatically assigned root route changes to the first lab's name. Explicit
 route choices are never changed silently.
 
+Complete labs can be downloaded or uploaded as ZIP archives from the
+authenticated browser setup page. AI agents can use `prepareLabExport` and
+`prepareLabImport` to obtain short-lived, one-time direct transfer URLs, so ZIP
+bytes do not pass through MCP JSON or model context. LSP-Claw creates fast
+stored/uncompressed ZIPs and accepts stored or compressed imports. Imports are
+fully validated and staged; they support only creation of a new named lab or
+explicitly confirmed replacement of a stopped lab, never file merging. See
+[Lab Archives](doc/Lab-Archives.md).
+
 The following diagram illustrates how a developer can use an AI agent
 running on a local computer to develop, test, and debug software
 directly on an embedded device over the local network. The AI agent
@@ -118,12 +127,15 @@ root:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/fastmcp/Test-FastMCP.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-management/Test-LabManagement.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-archive/Test-LabArchive.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-LSP-Claw.ps1
 ```
 
 The first isolates generic FastMCP. The second tests lab-management behavior in
-an isolated temporary Mako home. The third starts the complete LSP-Claw
-application and verifies a real Streamable HTTP session.
+an isolated temporary Mako home. The third verifies stored ZIP generation and
+ZipIo decompression independently. The fourth starts the complete LSP-Claw
+application and verifies Streamable HTTP, multiple labs, routes, browser and
+MCP archive transfers, staged replacement, and archive security boundaries.
 
 ## Running LSP-Claw
 

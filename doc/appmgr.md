@@ -184,6 +184,12 @@ explicitly selected so a later routing workflow never silently changes a user
 choice. A nonempty base path must be one URL-safe segment using the same
 character set as a lab name.
 
+When a second lab is created by any caller, `appmgr.createLab` changes an
+existing automatically assigned root route to that existing lab's name before
+creating the new lab. A running existing lab blocks this transition. An
+explicitly configured root route is never changed automatically. The fourth
+return value describes a performed route transition.
+
 Lab names are compared case-insensitively so the registry is portable across
 case-sensitive and case-insensitive filesystems. Duplicate names return
 `labAlreadyExists`; invalid names return `invalidLabName`. Base paths are also
@@ -218,6 +224,8 @@ performs on `lsplab`:
 | `lab:listBackups()` | List only this lab's backups. |
 | `lab:restore(name)` | Restore this lab from one of its backups. |
 | `lab:copy2lab(io, path)` | Stage and replace this lab from another BAS IO. |
+| `lab:createStageIo()` / `lab:removeStage(io, name)` | Create or discard sibling staging storage for an internal operation. |
+| `lab:replaceWithStage(io, name)` | Commit an already validated sibling stage by directory rename with rollback. The caller must hold the lab lock. |
 | `lab:rmlab()` | Remove all files from this lab. |
 
 Mutating lab methods are exclusive. If another mutation is active, they return

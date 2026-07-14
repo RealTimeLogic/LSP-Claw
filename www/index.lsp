@@ -53,6 +53,10 @@ if action == "save" and authorized then
    message = "Token settings saved."
 end
 
+
+local labs, labsError
+if authorized then labs, labsError = app.listLabs() end
+
 local githubSet = githubToken ~= nil and githubToken ~= ""
 local authSet = authToken ~= nil and authToken ~= ""
 ?>
@@ -143,6 +147,59 @@ local authSet = authToken ~= nil and authToken ~= ""
                <?lsp end ?>
             </div>
          </section>
+
+         <section class="panel" id="lab-manager">
+            <div class="panel-head">
+               <h2>Lab archives</h2>
+            </div>
+            <div class="panel-body">
+               <p class="field-note">Download or upload a complete lab as a ZIP file. LSP-Claw exports without compression and accepts stored or compressed ZIPs.</p>
+               <?lsp if labsError then ?>
+               <p class="error"><?lsp= html(labsError) ?></p>
+               <?lsp elseif not labs or #labs == 0 then ?>
+               <p>No labs exist yet. Upload an archive below and choose <strong>Create new lab</strong>.</p>
+               <?lsp else ?>
+               <div class="lab-list">
+                  <?lsp for _, lab in ipairs(labs) do ?>
+                  <div class="lab-row">
+                     <div>
+                        <strong><?lsp= html(lab.name) ?></strong>
+                        <span class="field-note">/<?lsp= html(lab.basePath) ?><?lsp= lab.basePath ~= "" and "/" or "" ?> &middot; <?lsp= lab.running and "running" or "stopped" ?></span>
+                     </div>
+                     <button class="secondary download-lab" type="button" data-lab-name="<?lsp= html(lab.name) ?>">Download ZIP</button>
+                  </div>
+                  <?lsp end ?>
+               </div>
+               <?lsp end ?>
+
+               <form id="labUploadForm" class="archive-upload">
+                  <div class="grid">
+                     <div>
+                        <label for="labArchive">Lab ZIP</label>
+                        <input id="labArchive" type="file" accept=".zip,application/zip" required>
+                     </div>
+                     <div>
+                        <label for="destinationLabName">Destination lab name</label>
+                        <input id="destinationLabName" type="text" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_-]*" required>
+                     </div>
+                     <div>
+                        <label for="conflictAction">Import action</label>
+                        <select id="conflictAction">
+                           <option value="createNew">Create new lab</option>
+                           <option value="replace">Replace stopped lab</option>
+                        </select>
+                     </div>
+                     <div id="replaceConfirmation" hidden>
+                        <label><input id="confirmedReplace" type="checkbox"> I confirm complete replacement of the destination lab</label>
+                     </div>
+                  </div>
+                  <div class="actions">
+                     <button type="submit">Upload and import ZIP</button>
+                  </div>
+                  <p id="archiveStatus" class="field-note" role="status"></p>
+               </form>
+            </div>
+         </section>
          <?lsp end ?>
       </main>
    </div>
@@ -158,6 +215,77 @@ local authSet = authToken ~= nil and authToken ~= ""
             toggle.textContent = showing ? "Show tokens" : "Hide tokens";
          });
       }
+
+      const uploadForm = document.getElementById("labUploadForm");
+      const conflictAction = document.getElementById("conflictAction");
+      const replaceConfirmation = document.getElementById("replaceConfirmation");
+      const confirmedReplace = document.getElementById("confirmedReplace");
+      const archiveStatus = document.getElementById("archiveStatus");
+      if (conflictAction) {
+         conflictAction.addEventListener("change", () => {
+            const replacing = conflictAction.value === "replace";
+            replaceConfirmation.hidden = !replacing;
+            confirmedReplace.required = replacing;
+            if (!replacing) confirmedReplace.checked = false;
+         });
+      }
+      if (uploadForm) {
+         uploadForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const file = document.getElementById("labArchive").files[0];
+            const labName = document.getElementById("destinationLabName").value;
+            archiveStatus.textContent = "Preparing secure upload...";
+            try {
+               const params = new URLSearchParams({
+                  action: "prepareImport",
+                  labName,
+                  conflictAction: conflictAction.value,
+                  confirmed: String(confirmedReplace.checked)
+               });
+               const preparedResponse = await fetch("lab-api.lsp", {
+                  method: "POST",
+                  credentials: "same-origin",
+                  headers: {"Content-Type": "application/x-www-form-urlencoded"},
+                  body: params
+               });
+               const prepared = await preparedResponse.json();
+               if (!preparedResponse.ok || !prepared.ok) throw new Error(prepared.error || "Cannot prepare import");
+               archiveStatus.textContent = "Uploading and validating archive...";
+               const uploadResponse = await fetch(prepared.result.uploadPath, {
+                  method: "POST",
+                  credentials: "same-origin",
+                  headers: {"Content-Type": "application/zip"},
+                  body: file
+               });
+               const imported = await uploadResponse.json();
+               if (!uploadResponse.ok || !imported.ok) throw new Error(imported.error || "Import failed");
+               archiveStatus.textContent = `Imported ${imported.result.fileCount} files into ${imported.result.labName}. Reloading...`;
+               window.setTimeout(() => window.location.reload(), 800);
+            } catch (error) {
+               archiveStatus.textContent = error.message;
+            }
+         });
+      }
+      document.querySelectorAll(".download-lab").forEach((button) => {
+         button.addEventListener("click", async () => {
+            button.disabled = true;
+            try {
+               const params = new URLSearchParams({action: "prepareExport", labName: button.dataset.labName});
+               const response = await fetch("lab-api.lsp", {
+                  method: "POST",
+                  credentials: "same-origin",
+                  headers: {"Content-Type": "application/x-www-form-urlencoded"},
+                  body: params
+               });
+               const prepared = await response.json();
+               if (!response.ok || !prepared.ok) throw new Error(prepared.error || "Cannot prepare export");
+               window.location.assign(prepared.result.downloadPath);
+            } catch (error) {
+               archiveStatus.textContent = error.message;
+               button.disabled = false;
+            }
+         });
+      });
    </script>
 </body>
 </html>

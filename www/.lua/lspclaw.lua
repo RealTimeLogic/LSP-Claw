@@ -359,6 +359,16 @@ local function absoluteUrl(origin, path)
    return origin:gsub("/+$", "") .. path
 end
 
+local function archiveTicketUrl(ctx,ticket)
+   local status=configurationStatusProvider and configurationStatusProvider() or {}
+   local base=tostring(status.setupBaseUri or "")
+   if base == "" then base="/" end
+   if base:sub(1,1) ~= "/" then base="/"..base end
+   if base:sub(-1) ~= "/" then base=base.."/" end
+   local path=base.."archive.lsp?ticket="..ticket
+   return absoluteUrl(requestOrigin(ctx),path),path
+end
+
 local function configurationStatus(ctx)
    local status = {}
    if type(configurationStatusProvider) == "function" then
@@ -702,7 +712,7 @@ local function ensureParentDirs(io, path)
    return true
 end
 
-local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
+local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo, archiveManager)
    mcp:tool("getRuntimeInfo", {
       description = "Return server-global Mako/Xedge runtime, configuration, and lab-capacity details. This tool does not require or change lab selection.",
       inputSchema = objectSchema(),
@@ -813,25 +823,8 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
       },{"labName"}),
       annotations = mutateAnnotations
    }, function(args, ctx)
-      local before,err=appmgr.listLabs()
-      if not before then return FastMCP.error("Cannot list labs",{code="listLabsFailed",error=err}) end
-      local routeChanged
-      if #before == 1 and before[1].basePath == "" and before[1].basePathExplicit ~= true then
-         local existing=assert(appmgr.getLab(before[1].name))
-         if existing:isRunning() then
-            return FastMCP.error("The existing root-mounted lab must be stopped before a second lab can be created and assigned a distinct route.",{
-               code="labMustBeStopped",
-               labName=existing:name(),
-               nextActions={"Stop the existing lab.","Call createLab again with the user-provided new lab name."}
-            })
-         end
-         local changed,changeErr,changeCode=appmgr.setLabBasePath(existing:name(),existing:name(),false)
-         if not changed then return FastMCP.error("Cannot assign the existing lab a distinct route",{code=changeCode or "setLabBasePathFailed",error=changeErr}) end
-         routeChanged={labName=existing:name(),oldBasePath="",newBasePath=existing:name()}
-      end
-      local lab,createErr,createCode=appmgr.createLab(args.labName,args.basePath)
+      local lab,createErr,createCode,routeChanged=appmgr.createLab(args.labName,args.basePath)
       if not lab then
-         if routeChanged then appmgr.setLabBasePath(routeChanged.labName,"",false) end
          return FastMCP.error("Cannot create lab",{code=createCode or "createLabFailed",labName=args.labName,error=createErr})
       end
       if ctx and ctx.sessionState then setSessionLabName(ctx,lab:name()) end
@@ -903,6 +896,59 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo)
       local runtime=runtimeInfo(appmgr,ctx,lab)
       return result("Lab base path changed.",runtime,{changed=true,basePath=lab:basePath(),labApp=labAppPaths({},ctx,lab)},runtime.warnings)
    end)
+
+   if archiveManager then
+      mcp:tool("prepareLabExport", {
+         description="Prepare a complete, uncompressed ZIP export of a lab and return a short-lived one-time download URL. The browser or client downloads the ZIP directly; do not copy it through MCP text.",
+         inputSchema=objectSchema({labName=stringSchema("Optional explicit lab override; otherwise use this session's selection.")}),
+         annotations=readAnnotations
+      }, function(args,ctx)
+         local lab,resolveErr=resolveLab(appmgr,args,ctx)
+         if not lab then return resolveErr end
+         local prepared,err,code=archiveManager:prepareExport(lab)
+         if not prepared then return labOperationError(lab,"export lab",err,code,"exportLabFailed") end
+         local url,path=archiveTicketUrl(ctx,prepared.ticket)
+         prepared.ticket=nil
+         prepared.downloadUrl=url
+         prepared.downloadPath=path
+         prepared.labName=lab:name()
+         return result("Lab export prepared. The download URL is short-lived and works once.",runtimeInfo(appmgr,ctx,lab),prepared,nil,{
+            "Download the ZIP directly from downloadUrl before it expires.",
+            "Do not request the ZIP contents through MCP text."
+         })
+      end)
+
+      mcp:tool("prepareLabImport", {
+         description="Prepare a short-lived one-time URL for uploading a complete lab ZIP. Use createNew for a new named lab or replace for a confirmed replacement of a stopped lab. Import never merges files.",
+         inputSchema=objectSchema({
+            labName=stringSchema("Destination lab name explicitly provided by the user."),
+            conflictAction=stringSchema("createNew or replace."),
+            confirmed=boolSchema("Must be true after explicit user confirmation when conflictAction is replace.",false)
+         },{"labName","conflictAction"}),
+         annotations=destructiveAnnotations
+      }, function(args,ctx)
+         local prepared,err,code=archiveManager:prepareImport(args.labName,args.conflictAction,args.confirmed)
+         if not prepared then
+            return FastMCP.error("Cannot prepare lab import",{
+               code=code or "prepareLabImportFailed",
+               labName=args.labName,
+               conflictAction=args.conflictAction,
+               requiresConfirmation=code == "labReplaceRequiresConfirmation" and true or nil,
+               error=err
+            })
+         end
+         local url,path=archiveTicketUrl(ctx,prepared.ticket)
+         prepared.ticket=nil
+         prepared.uploadUrl=url
+         prepared.uploadPath=path
+         prepared.method="POST"
+         prepared.contentType="application/zip"
+         return result("Lab import upload prepared. POST the raw ZIP body to the short-lived URL once.",runtimeInfo(appmgr,ctx),prepared,nil,{
+            "Upload the ZIP directly to uploadUrl as application/zip before it expires.",
+            "Do not encode or transfer the ZIP through MCP text."
+         })
+      end)
+   end
 
    mcp:tool("startLab", {
       description = "Start the lab app through appmgr.",
@@ -1438,7 +1484,7 @@ function M.register(mcp, ghio, info, appmgr, options)
    infoContentIo = options.io
    configurationStatusProvider = options.configurationStatus
    local runtimeTrace = setupRuntimeTrace(options.runtimeTrace, options.runtimeTraceBufferSize)
-   registerTools(mcp, ghio, info, appmgr, runtimeTrace, options.io)
+   registerTools(mcp, ghio, info, appmgr, runtimeTrace, options.io, options.archiveManager)
    registerResources(mcp, ghio, info, appmgr, options.instructions, options.io)
    registerPrompts(mcp, options.io)
    return mcp

@@ -63,6 +63,7 @@ local ghio,info = require"GitHubIo".create{
 }
 
 local appmgr=require"appmgr"
+local archiveManager=require"lab_archive".create(appmgr)
 
 local mcp = require"fastmcp.engine".create {
    name = "BAS Example Workspace Assistant",
@@ -154,8 +155,67 @@ require"lspclaw".register(mcp, ghio, info, appmgr, {
    io = io,
    runtimeTrace = runtimeTrace,
    runtimeTraceBufferSize = runtimeTraceBufferSize,
-   configurationStatus = getConfigurationStatus
+   configurationStatus = getConfigurationStatus,
+   archiveManager = archiveManager
 })
+
+local function authorizeArchiveRequest(cmd)
+   if not MCP_AUTH_TOKEN then return true end
+   if cmd:user() == "lsp-claw-admin" then return true end
+   return cmd:header"Authorization" == "Bearer "..MCP_AUTH_TOKEN
+end
+
+local function archivePath(ticket)
+   local base=(dir and dir:baseuri()) or "/"
+   if base == "" then base="/" end
+   if base:sub(-1) ~= "/" then base=base.."/" end
+   return base.."archive.lsp?ticket="..ticket
+end
+
+local function sendJson(response,status,value)
+   local encoded=ba.json.encode(value)
+   response:setstatus(status)
+   response:setcontenttype("application/json; charset=utf-8")
+   response:setheader("Cache-Control","no-store")
+   response:setheader("Content-Length",tostring(#encoded))
+   response:send(encoded)
+end
+
+function app.listLabs()
+   return appmgr.listLabs()
+end
+
+function app.prepareBrowserLabExport(labName)
+   local lab,err,code=appmgr.getLab(labName)
+   if not lab then return nil,err,code end
+   local prepared
+   prepared,err,code=archiveManager:prepareExport(lab)
+   if not prepared then return nil,err,code end
+   prepared.downloadPath=archivePath(prepared.ticket)
+   prepared.ticket=nil
+   return prepared
+end
+
+function app.labApiService(cmd,response)
+   if not authorizeArchiveRequest(cmd) then sendJson(response,401,{ok=false,error="Unauthorized"}) return end
+   if cmd:method() ~= "POST" then sendJson(response,405,{ok=false,error="Method not allowed"}) return end
+   if cmd:data("action") == "prepareExport" then
+      local prepared,err,code=app.prepareBrowserLabExport(cmd:data("labName"))
+      if not prepared then sendJson(response,409,{ok=false,error=err,code=code}) return end
+      sendJson(response,200,{ok=true,result=prepared})
+      return
+   end
+   if cmd:data("action") ~= "prepareImport" then sendJson(response,400,{ok=false,error="Unknown action"}) return end
+   local prepared,err,code=archiveManager:prepareImport(cmd:data("labName"),cmd:data("conflictAction"),cmd:data("confirmed") == "true")
+   if not prepared then sendJson(response,409,{ok=false,error=err,code=code}) return end
+   prepared.uploadPath=archivePath(prepared.ticket)
+   prepared.ticket=nil
+   sendJson(response,200,{ok=true,result=prepared})
+end
+
+function app.archiveService(cmd,response)
+   return archiveManager:handle(cmd,response,authorizeArchiveRequest(cmd))
+end
 
 function app.setRuntimeTraceBufferSize(size)
    if runtimeTrace.setBufferSize then

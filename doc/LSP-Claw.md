@@ -19,6 +19,8 @@ Related documents:
   transport, sessions, resources, tools, prompts, and notifications.
 - [appmgr.md](appmgr.md) explains the lab manager API used by LSP-Claw for lab
   creation, copying, backup, clearing, start, and stop operations.
+- [Lab-Archives.md](Lab-Archives.md) defines complete lab ZIP import/export,
+  validation limits, transfer tickets, and staged replacement.
 - [README.md](../README.md) is the user-facing tutorial and setup guide.
 
 ## Runtime Structure
@@ -33,11 +35,12 @@ At startup, `.preload`:
 3. Loads optional GitHub and MCP authentication tokens.
 4. Creates a `GitHubIo` instance for `RealTimeLogic/LSP-Examples`.
 5. Creates the `appmgr` lab manager.
-6. Creates a FastMCP server.
-7. Registers the LSP-Claw tools, resources, and prompts through
+6. Creates the lab archive manager.
+7. Creates a FastMCP server.
+8. Registers the LSP-Claw tools, resources, and prompts through
    `require"lspclaw".register(...)`.
-8. Creates the Streamable HTTP transport.
-9. Exposes `app.cmdService(cmd)`, which is called by `mcp.lsp`.
+9. Creates the Streamable HTTP transport.
+10. Exposes the MCP, archive, and browser lab-management services.
 
 `www/mcp.lsp` is intentionally small:
 
@@ -62,6 +65,8 @@ resources, prompts, lab behavior, and agent-facing instructions.
 - Trace capture and trace forwarding.
 - MCP Streamable HTTP transport configuration.
 - Origin and bearer-token authorization.
+- Short-lived archive upload/download services using the same authentication
+  boundary as the setup page and MCP endpoint.
 
 ### `www/.lua/lspclaw.lua`
 
@@ -140,6 +145,12 @@ LSP-Claw exposes a deliberately small API.
 - `backupLab`
 - `listLabBackups`
 - `restoreLab`
+- `prepareLabExport`
+- `prepareLabImport`
+
+`prepareLabExport` and `prepareLabImport` return short-lived direct binary
+transfer URLs. Archive bytes are not returned by MCP. See
+[Lab-Archives.md](Lab-Archives.md).
 
 ### Resources
 

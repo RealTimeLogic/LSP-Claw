@@ -157,7 +157,8 @@ label {
    font-size: .95rem;
 }
 
-input {
+input,
+select {
    width: 100%;
    min-height: 46px;
    border: 1px solid var(--inputbg);
@@ -168,10 +169,44 @@ input {
    font: inherit;
 }
 
-input:focus {
+input:focus,
+select:focus {
    outline: 3px solid rgba(105, 197, 117, .22);
    border-color: var(--green);
    background: var(--inputbghover);
+}
+
+input[type="checkbox"] {
+   width: auto;
+   min-height: auto;
+   margin-right: 8px;
+}
+
+.lab-list {
+   display: grid;
+   gap: 10px;
+   margin-top: 18px;
+}
+
+.lab-row {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: 16px;
+   padding: 12px 14px;
+   border: 1px solid var(--line);
+   border-radius: 8px;
+   background: var(--panel-strong);
+}
+
+.lab-row .field-note {
+   display: block;
+}
+
+.archive-upload {
+   margin-top: 24px;
+   padding-top: 22px;
+   border-top: 1px solid var(--line);
 }
 
 .field-note {
@@ -276,5 +311,10 @@ button:hover {
 
    button {
       width: 100%;
+   }
+
+   .lab-row {
+      align-items: stretch;
+      flex-direction: column;
    }
 }

@@ -1,0 +1,72 @@
+local x=mako or xedge
+assert(x,"Lab archive tests require Mako or Xedge")
+x.createloader(io)
+
+local zip=require"zip_writer"
+local rw=require"rwfile"
+local base=ba.openio("home") or ba.openio("disk")
+local passed=0
+
+local function check(condition,message)
+   if not condition then error("FAIL: "..tostring(message),2) end
+   passed=passed+1
+end
+
+local function equal(actual,expected,message)
+   check(actual == expected,(message or "values differ")..": expected "..tostring(expected)..", got "..tostring(actual))
+end
+
+equal(zip._crc32("123456789"),0xCBF43926,"CRC32")
+
+assert(base:mkdir("source"))
+local sourceIo=assert(ba.mkio(base,"source"))
+local binary="A\0B\255C"
+assert(rw.file(sourceIo,"binary.dat",binary))
+
+local output=assert(base:open("stored.zip","wb"))
+local info,err=zip.write({
+   {path=".lsp-claw-lab.json",content=ba.json.encode{format="lsp-claw-lab",version=1,exportedLabName="test",fileCount=2,uncompressedBytes=#binary+5,emptyDirectories={"empty-dir"}}},
+   {path="empty-dir",directory=true},
+   {path="hello.txt",content="hello"},
+   {path="nested/binary.dat",source={io=sourceIo,path="binary.dat"}}
+},function(chunk) return output:write(chunk) end)
+check(info ~= nil,"stored ZIP is written: "..tostring(err))
+check(info.stored == true and info.entryCount == 4,"stored ZIP metadata")
+assert(output:close())
+
+local zipIo=assert(ba.mkio(base,"stored.zip"))
+equal(assert(rw.file(zipIo,"hello.txt")),"hello","stored text round trip")
+equal(assert(rw.file(zipIo,"nested/binary.dat")),binary,"stored binary round trip")
+-- ZipIo intentionally ignores explicit directory entries. Empty directories are
+-- therefore restored from the manifest; directories containing files are
+-- represented normally by ZipIo's virtual tree.
+local nestedStat=zipIo:stat("nested")
+check(nestedStat and nestedStat.isdir,"stored directory tree round trip")
+local manifest=assert(ba.json.decode(assert(rw.file(zipIo,".lsp-claw-lab.json"))))
+equal(manifest.format,"lsp-claw-lab","manifest round trip")
+equal(manifest.emptyDirectories[1],"empty-dir","empty directory manifest round trip")
+if zipIo.close then zipIo:close() end
+
+local compressed=assert(ba.mkio(base,"compressed.zip"))
+equal(assert(rw.file(compressed,"compressed.txt")),"ZipIo decompresses this content","ZipIo accepts compressed entries")
+if compressed.close then compressed:close() end
+
+local data
+data,err=zip.encode({{path="../escape.txt",content="x"}})
+check(not data and err:find("parent segment",1,true),"parent traversal is rejected")
+data,err=zip.encode({{path="C:/escape.txt",content="x"}})
+check(not data and err:find("drive prefix",1,true),"drive path is rejected")
+data,err=zip.encode({{path="a.txt",content="1"},{path="A.TXT",content="2"}})
+check(not data and err:find("duplicate",1,true),"portable duplicate path is rejected")
+data,err=zip.encode({{path="large.bin",content=string.rep("x",20)}},{maxEntryBytes=10})
+check(not data and err:find("size limit",1,true),"entry size is bounded")
+
+local generation=0
+data,err=zip.encode({{path="changing.txt",producer=function(emit)
+   generation=generation+1
+   emit(generation == 1 and "first" or "second")
+end}})
+check(not data and err:find("changed between reads",1,true),"changing source is rejected")
+
+trace("LAB_ARCHIVE_TEST_PASS","checks="..passed)
+if mako and mako.exit then mako.exit(0) end

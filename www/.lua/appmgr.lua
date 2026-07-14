@@ -222,14 +222,40 @@ local function stripBasePath(basePath,fname)
    return fname:sub(#basePath+2)
 end
 
+local function copyFile(fromIo,fromName,toIo,toName)
+   local source,err=fromIo:open(fromName,"rb")
+   if not source then return nil,err end
+   local target
+   target,err=toIo:open(toName,"wb")
+   if not target then source:close() return nil,err end
+   local ok=true
+   while true do
+      local chunk,readErr=source:read(16384)
+      if chunk and #chunk > 0 then
+         ok,err=target:write(chunk)
+         if not ok then break end
+      elseif readErr then
+         ok,err=nil,readErr
+         break
+      else
+         break
+      end
+   end
+   local sourceOk,sourceErr=source:close()
+   local targetOk,targetErr=target:close()
+   if not ok then return nil,err end
+   if sourceOk == false then return nil,sourceErr end
+   if targetOk == false then return nil,targetErr end
+   return true
+end
+
 local function copyDirContents(fromIo,basePath,toIo)
    local ok,err=true
    for path,name in recDirIter(fromIo,basePath,true) do
       if name then
 	 local fromName=filePath(path,name)
 	 local toName=stripBasePath(basePath,fromName)
-	 ok,err=rw.file(fromIo,fromName)
-	 if ok then ok,err=rw.file(toIo,toName,ok) end
+	 ok,err=copyFile(fromIo,fromName,toIo,toName)
 	 if not ok then err=sfmt("copy %s: %s",fromName,err) break end
       else
 	 local toPath=stripBasePath(basePath,path)
@@ -401,8 +427,7 @@ local function copyDir(fromIo,basePath,toIo,copy,baseLen,lab)
       if name then
 	 local fname=filePath(path,name)
 	 if copy then
-	    ok,err=rw.file(fromIo,fname)
-	    if ok then ok,err=rw.file(toIo,fname,ok) end
+	    ok,err=copyFile(fromIo,fname,toIo,fname)
 	    if not ok then err=sfmt("copy %s: %s",fname,err) break end
 	 else
 	    local from=fromIo:realpath(fname):sub(baseLen)
@@ -420,20 +445,76 @@ local function copyDir(fromIo,basePath,toIo,copy,baseLen,lab)
    return nil,err
 end
 
-function Lab:createStageIo()
+local function createStageIo(name)
    for i=1,1000 do
-      local name=sfmt("%s-stage-%d-%d",self.labn,os.time(),i)
-      if not bio:stat(name) then
-	 local stageIo,err=mkio(bio,name)
-	 return stageIo,name,err
+      local stageName=sfmt("%s-stage-%d-%d",name,os.time(),i)
+      if not bio:stat(stageName) then
+         local stageIo,err=mkio(bio,stageName)
+         return stageIo,stageName,err
       end
    end
    return nil,nil,"Cannot create unique staging directory"
 end
 
-function Lab:removeStage(stageIo,stageName)
+local function removeStage(stageIo,stageName)
    if stageIo then removeAll(stageIo) end
    if stageName then bio:rmdir(stageName) end
+end
+
+function Lab:createStageIo()
+   return createStageIo(self.labn)
+end
+
+function Lab:removeStage(stageIo,stageName)
+   return removeStage(stageIo,stageName)
+end
+
+-- Replace the stopped lab with a fully prepared sibling staging directory.
+-- The directory renames keep the old lab available for rollback until the new
+-- directory has taken its place. The caller owns validation and the lab lock.
+function Lab:replaceWithStage(stageIo,stageName)
+   if self.running then return nil,"lab must be stopped before import","labMustBeStopped" end
+   if not stageIo or type(stageName) ~= "string" or not bio:stat(stageName) then
+      return nil,"prepared staging directory is unavailable","invalidLabStage"
+   end
+   local ok,err=self:create()
+   if not ok then return nil,err end
+   local oldName
+   for i=1,1000 do
+      local candidate=sfmt("%s-stage-old-%d-%d",self.labn,os.time(),i)
+      if not bio:stat(candidate) then oldName=candidate break end
+   end
+   if not oldName then return nil,"Cannot create unique rollback directory" end
+
+   self.labIo=nil
+   ok,err=bio:rename(self.labn,oldName)
+   if not ok then
+      self.labIo=ba.mkio(bio,self.labn)
+      return nil,sfmt("Cannot stage existing lab %s: %s",self.labn,err or "?")
+   end
+   ok,err=bio:rename(stageName,self.labn)
+   if not ok then
+      local rollbackOk,rollbackErr=bio:rename(oldName,self.labn)
+      self.labIo=ba.mkio(bio,self.labn)
+      if not rollbackOk then
+         return nil,sfmt("Cannot install imported lab (%s) and rollback failed (%s)",err or "?",rollbackErr or "?")
+      end
+      return nil,sfmt("Cannot install imported lab: %s",err or "?")
+   end
+
+   self.labIo,err=ba.mkio(bio,self.labn)
+   if not self.labIo then
+      bio:rename(self.labn,stageName)
+      bio:rename(oldName,self.labn)
+      self.labIo=ba.mkio(bio,self.labn)
+      return nil,sfmt("Cannot open imported lab: %s",err or "?")
+   end
+   local oldIo=ba.mkio(bio,oldName)
+   local cleanupOk,cleanupErr=true
+   if oldIo then cleanupOk,cleanupErr=removeAll(oldIo) end
+   if cleanupOk then cleanupOk,cleanupErr=bio:rmdir(oldName) end
+   self:touch()
+   return true,cleanupOk and nil or sfmt("Imported lab is active, but rollback cleanup failed: %s",cleanupErr or "?")
 end
 
 function Lab:backup(name,copy)
@@ -586,6 +667,16 @@ function appmgr.registryFile()
    return registryFile
 end
 
+function appmgr.createStageIo(labName)
+   local valid,err=validateLabName(labName)
+   if not valid then return nil,nil,err end
+   return createStageIo(valid)
+end
+
+function appmgr.removeStage(stageIo,stageName)
+   return removeStage(stageIo,stageName)
+end
+
 function appmgr.listLabs()
    local ok,err=loadRegistry()
    if not ok then return nil,err end
@@ -604,7 +695,22 @@ function appmgr.getLab(name)
 end
 
 function appmgr.createLab(name,basePath)
-   return addLab(name,basePath)
+   local ok,err=loadRegistry()
+   if not ok then return nil,err end
+   local routeChanged
+   if #registry.labs == 1 and registry.labs[1].basePath == "" and registry.labs[1].basePathExplicit ~= true then
+      local existing=objectFor(registry.labs[1])
+      if existing:isRunning() then
+         return nil,"lab "..existing:name().." must be stopped before another lab is created","labMustBeStopped"
+      end
+      local changed,changeErr,changeCode=appmgr.setLabBasePath(existing:name(),existing:name(),false)
+      if not changed then return nil,changeErr,changeCode end
+      routeChanged={labName=existing:name(),oldBasePath="",newBasePath=existing:name()}
+   end
+   local lab,createErr,createCode=addLab(name,basePath)
+   if lab then return lab,nil,nil,routeChanged end
+   if routeChanged then appmgr.setLabBasePath(routeChanged.labName,"",false) end
+   return nil,createErr,createCode
 end
 
 local function routeOwner(basePath,exceptInfo)
