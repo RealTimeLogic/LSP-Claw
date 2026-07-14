@@ -586,8 +586,7 @@ the direct ZIP transfer instead of relaying files:
 Copy the complete lab named router-demo from lsp_claw_1 to a new lab named
 router-demo-copy on lsp_claw_2. Use LSP-Claw's direct server-to-server ZIP
 transfer, not per-file copying. Show me the exact source origin reported by the
-destination and wait for my confirmation before it fetches the ZIP. Never
-forward either server's MCP bearer token.
+destination and wait for my confirmation before it fetches the ZIP.
 ```
 
 The destination intentionally stops at a confirmation gate. After checking the
