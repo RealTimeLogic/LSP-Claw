@@ -109,16 +109,30 @@ itself is localhost.
 Use these only when the task touches the matching area. Do not load every skill
 by default.
 
+- BAS skill selector:
+  https://realtimelogic.com/downloads/ai-skills/AGENTS.md
 - BAS VFS/routing/resource readers:
   https://realtimelogic.com/downloads/ai-skills/VFS-skill.md
 - Authentication, authorization, sessions, users:
   https://realtimelogic.com/downloads/ai-skills/Authentication-Authorization-Skill.md
 - General OWASP-style BAS security review:
   https://realtimelogic.com/downloads/ai-skills/OWASP-General-Security-Skill.md
-- SMQ topics, browser/device messaging, broker authorization:
-  https://realtimelogic.com/downloads/ai-skills/SMQ-Skill.md
 - SQLite dedicated-writer pattern:
   https://realtimelogic.com/downloads/ai-skills/SQLite-Skill.md
+- SMQ topics, browser/device messaging, broker authorization:
+  https://realtimelogic.com/downloads/ai-skills/SMQ-Skill.md
+- Lua/native bindings and custom BAS runtime integration:
+  https://realtimelogic.com/downloads/ai-skills/Lua-Binding-Skill.md
+- Mako Server deployment, services, mako.conf, logs, and certificates:
+  https://realtimelogic.com/downloads/ai-skills/Deploy-Mako-Server-Skill.md
+- LSP web interfaces, forms, htmx, Fetch/JSON, WebSockets, and dashboards:
+  https://realtimelogic.com/downloads/ai-skills/Build-LSP-Web-Interfaces-Skill.md
+
+Start with the smallest matching skill. Add another only when the task crosses
+into that area. For example, combine VFS, authentication, and OWASP for a
+protected REST/admin subtree; combine LSP web interfaces, SQLite, and OWASP for
+a database-backed browser form or API; combine LSP web interfaces and SMQ for a
+live browser/device dashboard.
 
 ## Example-First Workflow
 
@@ -217,18 +231,47 @@ directly with the MCP tools.
 
 ## BAS API Guidance
 
-Use official BAS documentation before inventing APIs:
+Use official BAS documentation and public BAS AI skills before inventing APIs.
+The old BAS and Mako tutorial markdown files have been replaced by task-specific
+skills. Use the BAS skill selector first when you need to choose which public
+skill applies:
+
+- BAS skill selector:
+  https://realtimelogic.com/downloads/ai-skills/AGENTS.md
+
+For exact API names, signatures, and behavior, use:
 
 - basapi.md:
   https://realtimelogic.com/downloads/basapi.md
-- BAS tutorials:
-  https://realtimelogic.com/downloads/tutorials.md
-- Mako tutorials:
-  https://makoserver.net/download/tutorials.md
 - ESP32/Xedge32 API:
   https://realtimelogic.com/downloads/esp32api.md
 - OPC UA API:
   https://realtimelogic.com/downloads/opcuaapi.md
+
+Reference priority:
+
+1. Use basapi.md for BAS API syntax, signatures, and behavior.
+2. Use esp32api.md for Xedge32 and ESP32-specific APIs.
+3. Use opcuaapi.md for OPC UA-specific APIs.
+
+Use task-specific skills for architecture and workflow guidance:
+
+- Use VFS/routing for URL layout, static files, resource readers, directory
+  callbacks, mounted subdirectories, WebDAV, WFS, and protection boundaries.
+- Use authentication/authorization for login, sessions, users, roles, and
+  protected pages or APIs.
+- Use OWASP as a cross-cutting review when an app is public, production-ready,
+  network-exposed, or handles untrusted input.
+- Use SQLite before designing request handlers that mutate SQLite data.
+- Use SMQ for publish/subscribe, presence, request/reply, browser/device
+  messaging, or synchronized clients.
+- Use Lua bindings only for native C/C++ integration and BAS native objects.
+- Use LSP web interfaces when choosing full-page LSP, forms, htmx, Fetch/JSON,
+  WebSockets, SMQ, dashboards, or control-panel interaction models.
+- Use Mako deployment for unattended service operation, mako.conf, service
+  identity, logs, restart behavior, and certificate lifecycle.
+
+If a skill conflicts with the relevant API reference, trust the API reference.
 
 Treat BAS as an embedded/edge application server, not a generic web framework.
 Prefer BAS-native APIs and examples over third-party Lua modules.
