@@ -19,9 +19,9 @@ Edition. See the [detailed instructions](Instructions.md) for other setups, incl
    mako -credentials admin:your-password
    ```
 
-   For a service or public server, use the safer
-   [`-credentials-file` and `-token-file` options](Instructions.md#command-line-credential-bootstrap)
-   so secrets do not appear in command history or process listings.
+   You may add `-token your-mcp-bearer-token` to initialize MCP authentication
+   at the same time. See the
+   [credential bootstrap instructions](Instructions.md#command-line-credential-bootstrap).
 2. Open [http://localhost/lsp-claw/](http://localhost/lsp-claw/) and sign in with
    the browser administrator. If you plan to
    access the LSP-Examples repository through LSP-Claw, enter a GitHub token and

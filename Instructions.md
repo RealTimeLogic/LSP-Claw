@@ -160,8 +160,8 @@ mako -l::Xedge.zip -l::lsp-claw.zip # Include Xedge, MCP URL http://localhost/mc
 mako -l::Xedge.zip # Only Xedge, MCP URL http://localhost/lsp-claw/mcp.lsp
 ```
 
-On the first Mako start, add `-credentials` or `-credentials-file` to create
-the browser configuration administrator. See
+On the first Mako start, add `-credentials` to create the browser configuration
+administrator. See
 [Command-Line Credential Bootstrap](#command-line-credential-bootstrap).
 
 In the last example, LSP-Claw is not loaded when Mako Server starts. Instead,
@@ -229,32 +229,22 @@ bytes and cannot contain NUL, CR, or LF characters:
 mako -l::lsp-claw.zip -credentials admin:your-password -token your-mcp-bearer-token
 ```
 
-For services and public VPS deployments, use files so secrets are not exposed
-in command history or process listings:
-
-```text
-mako -l::lsp-claw.zip -credentials-file C:\secrets\lsp-claw-credentials.txt -token-file C:\secrets\lsp-claw-token.txt
-```
-
-Use absolute native file paths. Each file must contain one line. The credentials
-file contains `username:password`; the token file contains only the bearer
-token. Restrict both files so they are readable only by the operating-system
-account running Mako. An optional UTF-8 BOM and the final CR/LF are accepted.
-
 Bootstrap is one-time. Once `LSP-Claw-Admin.bin` contains an administrator, all
-four command-line bootstrap options are ignored and cannot replace either the
-administrator or MCP token. Browser credentials are TPM-encrypted in
+later `-credentials` and `-token` values are ignored and cannot replace either
+the administrator or MCP token. Browser credentials are TPM-encrypted in
 `LSP-Claw-Admin.bin`; GitHub and MCP tokens remain encrypted in
 `LSP-Claw-Keys.bin`.
 
 For an existing installation that already has GitHub or MCP token settings but
-no browser administrator, restart it once with `-credentials` or
-`-credentials-file`. Existing tokens are preserved. Until an administrator is
-created, the browser page shows setup instructions instead of exposing token or
-lab settings.
+no browser administrator, restart it once with `-credentials`. Existing tokens
+are preserved. Until an administrator is created, the browser page shows setup
+instructions instead of exposing token or lab settings.
 
-See [Credential Bootstrap](doc/Credential-Bootstrap.md) for complete option,
-validation, upgrade, and security details.
+Direct command-line secrets may be visible in command history and process
+listings. This is an accepted limitation of the minimal bootstrap.
+
+See [Credential Bootstrap](doc/Credential-Bootstrap.md) for validation,
+upgrade, and security details.
 
 ## Configure Tokens
 

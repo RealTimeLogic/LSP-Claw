@@ -401,7 +401,7 @@ local function configurationStatus(ctx)
       tinsert(warnings, "No MCP authentication token is configured. Any client that can reach this MCP endpoint can use the server.")
    end
    if not browserAdminConfigured then
-      tinsert(warnings, "No browser configuration administrator is configured. Restart LSP-Claw once with -credentials or -credentials-file before using the browser settings page.")
+      tinsert(warnings, "No browser configuration administrator is configured. Restart LSP-Claw once with -credentials before using the browser settings page.")
    end
    return {
       browserAdministrator = {

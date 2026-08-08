@@ -32,10 +32,6 @@ function M.create(storeIo)
 
    local self={}
 
-   function self:users()
-      return tju.users()
-   end
-
    function self:configured()
       return #tju.users() > 0
    end
@@ -64,17 +60,6 @@ function M.create(storeIo)
          tju=ba.tpm.jsonuser(KEY_NAME,false)
          return nil,"cannot save browser administrator database: "..tostring(saveErr or "unknown error")
       end
-      return true
-   end
-
-   function self:clear()
-      if storeIo:stat(DATABASE_PATH) then
-         local ok,removeErr=storeIo:remove(DATABASE_PATH)
-         if not ok then
-            return nil,"cannot remove browser administrator database: "..tostring(removeErr or "unknown error")
-         end
-      end
-      tju=ba.tpm.jsonuser(KEY_NAME,false)
       return true
    end
 

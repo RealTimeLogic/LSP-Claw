@@ -21,6 +21,7 @@ $process = $null
 
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 Copy-Item (Join-Path $repo "www") (Join-Path $stage "www") -Recurse
+[IO.File]::WriteAllText((Join-Path $stage "mako.conf"),"port=$Port`r`nsslport=0`r`n",[Text.UTF8Encoding]::new($false))
 $staleImportStage = Join-Path $stage "LSPClawImport-stage-stale"
 New-Item -ItemType Directory -Path $staleImportStage | Out-Null
 [IO.File]::WriteAllText((Join-Path $staleImportStage "partial.txt"),"discard")

@@ -122,9 +122,9 @@ local authSet = authToken ~= nil and authToken ~= ""
                <h2>Administrator setup required</h2>
             </div>
             <div class="panel-body">
-               <p>Restart LSP-Claw once with <code>-credentials username:password</code>
-               or <code>-credentials-file &lt;absolute-path&gt;</code> to create the
-               browser configuration administrator.</p>
+               <p>Restart LSP-Claw once with
+               <code>-credentials username:password</code> to create the browser
+               configuration administrator.</p>
             </div>
          </section>
          <?lsp elseif not authorized then ?>

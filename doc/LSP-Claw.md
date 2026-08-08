@@ -358,10 +358,9 @@ Under Mako, tokens can come from environment variables or `mako.conf`.
 
 The browser administrator is persisted in `LSP-Claw-Admin.bin` by
 `.lua/admin_credentials.lua`, using `ba.tpm.jsonuser` with a device-specific
-key. `.lua/bootstrap.lua` parses the one-time `-credentials`,
-`-credentials-file`, `-token`, and `-token-file` options. Bootstrap runs after
-the administrator and existing encrypted token settings are loaded, but before
-the browser handlers and MCP transport are finalized.
+key. A small scan in `.preload` handles the one-time `-credentials` and
+`-token` options after the administrator and existing encrypted token settings
+are loaded, but before the browser handlers and MCP transport are finalized.
 
 The browser page calls `app.getSetTokens(githubToken, authToken)`. Tokens saved
 this way are stored encrypted using key material derived from

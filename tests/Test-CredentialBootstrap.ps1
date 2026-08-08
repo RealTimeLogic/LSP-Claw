@@ -189,22 +189,6 @@ try {
    Assert-True ((Get-McpInitializeStatus $server $replacementToken) -in @(401,403)) "Restart accepted the replacement MCP token"
    Stop-TestServer $server
 
-   # Native absolute Windows file paths, UTF-8 BOM, trailing newlines, and file
-   # values are handled without exposing secrets on the command line.
-   $fileRuntime = New-Runtime "files"
-   $credentialsFile = Join-Path $fileRuntime "bootstrap-credentials.txt"
-   $tokenFile = Join-Path $fileRuntime "bootstrap-token.txt"
-   $fileUsername = "file-admin"
-   $filePassword = "file:password"
-   $fileToken = "file-bootstrap-token-0123456789"
-   [IO.File]::WriteAllText($credentialsFile,"${fileUsername}:${filePassword}`r`n",[Text.UTF8Encoding]::new($true))
-   [IO.File]::WriteAllText($tokenFile,"${fileToken}`n",[Text.UTF8Encoding]::new($false))
-   $server = Start-TestServer $fileRuntime @("-credentials-file",$credentialsFile,"-token-file",$tokenFile)
-   Assert-True $server.Started "File credential bootstrap did not start.`n$($server.Log)"
-   Assert-True ((Login-Browser $server $fileUsername $filePassword).Response.Content -match "Token settings") "File bootstrap administrator could not log in"
-   Assert-McpHandshake $server $fileToken
-   Stop-TestServer $server
-
    # Existing token-only installations stay intact and can add the first
    # browser administrator on a later start.
    $legacyRuntime = New-Runtime "legacy-upgrade"
@@ -227,61 +211,23 @@ try {
    Assert-McpHandshake $server $legacyToken
    Stop-TestServer $server
 
-   # Invalid and conflicting inputs must fail before creating either store.
+   # Invalid inputs must fail before creating either store.
    Assert-BootstrapFailure "short-token" @("-credentials","admin:password","-token","short") "MCP token must contain at least 16 bytes"
-
-   $oversizedRuntime = New-Runtime "oversized-token"
-   $oversizedFile = Join-Path $oversizedRuntime "oversized-token.txt"
-   [IO.File]::WriteAllText($oversizedFile,("x" * 4097),[Text.UTF8Encoding]::new($false))
-   $oversizedServer = Start-TestServer $oversizedRuntime @("-credentials","admin:password","-token-file",$oversizedFile)
-   try {
-      Assert-True (-not $oversizedServer.Started) "Oversized token unexpectedly started"
-      Assert-True ($oversizedServer.Log -match "MCP token must not exceed 4096 bytes") "Oversized token was not rejected"
-      Assert-True (-not (Test-Path -LiteralPath (Join-Path $oversizedRuntime "LSP-Claw-Admin.bin"))) "Oversized token created a partial administrator"
-   }
-   finally { Stop-TestServer $oversizedServer }
-
-   $newlineRuntime = New-Runtime "newline-token"
-   $newlineFile = Join-Path $newlineRuntime "newline-token.txt"
-   [IO.File]::WriteAllText($newlineFile,"valid-token-prefix`nsecond-line",[Text.UTF8Encoding]::new($false))
-   $newlineServer = Start-TestServer $newlineRuntime @("-credentials","admin:password","-token-file",$newlineFile)
-   try {
-      Assert-True (-not $newlineServer.Started) "Embedded-newline token unexpectedly started"
-      Assert-True ($newlineServer.Log -match "token file must contain one line") "Embedded-newline token was not rejected"
-      Assert-True (-not (Test-Path -LiteralPath (Join-Path $newlineRuntime "LSP-Claw-Admin.bin"))) "Embedded-newline token created a partial administrator"
-   }
-   finally { Stop-TestServer $newlineServer }
-
    Assert-BootstrapFailure "malformed-credentials" @("-credentials","missing-colon") "credentials must use username:password"
-   Assert-BootstrapFailure "duplicate-option" @("-credentials","admin:password","-credentials","other:password") "Duplicate LSP-Claw bootstrap option: -credentials"
    Assert-BootstrapFailure "missing-value" @("-credentials","-token","valid-bootstrap-token-0123456789") "bootstrap option -credentials requires a value"
    Assert-BootstrapFailure "empty-value" @("-credentials",'""') "bootstrap option -credentials requires a value"
+   Assert-BootstrapFailure "token-only" @("-token","token-only-bootstrap-0123456789") "requires -credentials"
 
-   $credentialConflictRuntime = New-Runtime "credential-conflict"
-   $credentialConflictFile = Join-Path $credentialConflictRuntime "credentials.txt"
-   [IO.File]::WriteAllText($credentialConflictFile,"file-admin:file-password",[Text.UTF8Encoding]::new($false))
-   $credentialConflictServer = Start-TestServer $credentialConflictRuntime @("-credentials","admin:password","-credentials-file",$credentialConflictFile)
-   try {
-      Assert-True (-not $credentialConflictServer.Started) "Conflicting credential options unexpectedly started"
-      Assert-True ($credentialConflictServer.Log -match "Use either -credentials or -credentials-file, not both") "Conflicting credential options were not rejected"
-      Assert-True (-not (Test-Path -LiteralPath (Join-Path $credentialConflictRuntime "LSP-Claw-Admin.bin"))) "Credential conflict created a partial administrator"
-   }
-   finally { Stop-TestServer $credentialConflictServer }
+   # Duplicate direct options are deliberately minimal: the first value wins.
+   $firstRuntime = New-Runtime "first-occurrence"
+   $firstToken = "first-bootstrap-token-0123456789"
+   $server = Start-TestServer $firstRuntime @("-credentials","first-admin:first-password","-credentials","ignored-admin:ignored-password","-token",$firstToken,"-token","short")
+   Assert-True $server.Started "First-occurrence bootstrap failed.`n$($server.Log)"
+   Assert-True ((Login-Browser $server "first-admin" "first-password").Response.Content -match "Token settings") "First credentials occurrence did not win"
+   Assert-McpHandshake $server $firstToken
+   Stop-TestServer $server
 
-   $tokenConflictRuntime = New-Runtime "token-conflict"
-   $tokenConflictFile = Join-Path $tokenConflictRuntime "token.txt"
-   [IO.File]::WriteAllText($tokenConflictFile,"file-bootstrap-token-0123456789",[Text.UTF8Encoding]::new($false))
-   $tokenConflictServer = Start-TestServer $tokenConflictRuntime @("-credentials","admin:password","-token","direct-bootstrap-token-0123456789","-token-file",$tokenConflictFile)
-   try {
-      Assert-True (-not $tokenConflictServer.Started) "Conflicting token options unexpectedly started"
-      Assert-True ($tokenConflictServer.Log -match "Use either -token or -token-file, not both") "Conflicting token options were not rejected"
-      Assert-True (-not (Test-Path -LiteralPath (Join-Path $tokenConflictRuntime "LSP-Claw-Admin.bin"))) "Token conflict created a partial administrator"
-   }
-   finally { Stop-TestServer $tokenConflictServer }
-
-   Assert-BootstrapFailure "token-only" @("-token","token-only-bootstrap-0123456789") "requires -credentials or -credentials-file"
-
-   Write-Output "CREDENTIAL_BOOTSTRAP_TEST_PASS direct=true colonPassword=true bearer=true encrypted=true oneTime=true files=true legacyUpgrade=true validation=true separated=true"
+   Write-Output "CREDENTIAL_BOOTSTRAP_TEST_PASS direct=true colonPassword=true bearer=true encrypted=true oneTime=true firstWins=true legacyUpgrade=true validation=true separated=true"
 }
 finally {
    $env:GITHUB_TOKEN=$oldGitHubToken

@@ -75,16 +75,44 @@ if tokenSettingsErr then error("LSP-Claw token settings failed: "..tostring(toke
 
 local adminCredentials,adminErr=require"admin_credentials".create(settingsIo)
 if not adminCredentials then error("LSP-Claw startup failed: "..tostring(adminErr)) end
-app.adminCredentials=adminCredentials
 
-local bootstrapOk,bootstrapErr=pcall(function()
-   require"bootstrap".run{
-      argv=mako and mako.argv or {},
-      admin=adminCredentials,
-      validateToken=validateMcpToken,
-      saveToken=function(token) return storeTokens(GITHUB_TOKEN,token) end
-   }
-end)
+local function bootstrap()
+   local credentials,token
+   for ix,arg in ipairs(mako and mako.argv or {}) do
+      if (arg == "-credentials" and not credentials) or
+         (arg == "-token" and not token) then
+         if adminCredentials:configured() then
+            trace("LSP-Claw command-line bootstrap ignored: an administrator already exists")
+            return
+         end
+         local value=mako.argv[ix+1]
+         if type(value) ~= "string" or value == "" or value:sub(1,1) == "-" then
+            error("LSP-Claw bootstrap option "..arg.." requires a value",2)
+         end
+         if arg == "-credentials" then credentials=value else token=value end
+      end
+   end
+   if not credentials and not token then return end
+   if not credentials then error("LSP-Claw command-line bootstrap requires -credentials",2) end
+   local sep=credentials:find(":",1,true)
+   if not sep or sep == 1 or sep == #credentials then
+      error("LSP-Claw bootstrap credentials must use username:password",2)
+   end
+   if token then
+      local valid,err=validateMcpToken(token)
+      if not valid then error(err,2) end
+   end
+   local ok,err=adminCredentials:create(credentials:sub(1,sep-1),credentials:sub(sep+1))
+   if not ok then error("LSP-Claw administrator bootstrap failed: "..tostring(err),2) end
+   if token then
+      ok,err=storeTokens(GITHUB_TOKEN,token)
+      if not ok then error("LSP-Claw MCP token bootstrap failed: "..tostring(err),2) end
+   end
+   trace("LSP-Claw command-line bootstrap created the first browser administrator")
+   if token then trace("LSP-Claw command-line bootstrap enabled MCP authentication") end
+end
+
+local bootstrapOk,bootstrapErr=pcall(bootstrap)
 if not bootstrapOk then
    trace("LSP-Claw command-line bootstrap failed: "..tostring(bootstrapErr))
    error(bootstrapErr,0)
