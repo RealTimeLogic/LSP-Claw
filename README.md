@@ -12,8 +12,18 @@ Edition. See the [detailed instructions](Instructions.md) for other setups, incl
 
 ## Connect LSP-Claw
 
-1. Install and start Mako using the Developer Edition instructions.
-2. Open [http://localhost/lsp-claw/](http://localhost/lsp-claw/). If you plan to
+1. Install Mako using the Developer Edition instructions. On its first start,
+   create the LSP-Claw browser administrator. For example:
+
+   ```text
+   mako -credentials admin:your-password
+   ```
+
+   For a service or public server, use the safer
+   [`-credentials-file` and `-token-file` options](Instructions.md#command-line-credential-bootstrap)
+   so secrets do not appear in command history or process listings.
+2. Open [http://localhost/lsp-claw/](http://localhost/lsp-claw/) and sign in with
+   the browser administrator. If you plan to
    access the LSP-Examples repository through LSP-Claw, enter a GitHub token and
    click **Save tokens**.
 3. Add an MCP server named `lsp_claw` to your AI agent using this URL:

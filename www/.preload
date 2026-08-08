@@ -5,14 +5,30 @@ x.createloader(io)
 local rw=require"rwfile"
 local GITHUB_TOKEN,MCP_AUTH_TOKEN
 local GITHUB_API=os.getenv"LSP_CLAW_GITHUB_API" or "https://api.github.com"
+local settingsIo=ba.openio(mako and "home" or "disk")
+
+local function validateMcpToken(token)
+   if type(token) ~= "string" then return nil,"MCP token must be a string" end
+   if #token < 16 then return nil,"MCP token must contain at least 16 bytes" end
+   if #token > 4096 then return nil,"MCP token must not exceed 4096 bytes" end
+   if token:find("[%z\r\n]") then return nil,"MCP token contains invalid characters" end
+   return token
+end
+
+app.validateMcpToken=validateMcpToken
 
 local function storeTokens(githubToken,authToken)
-   local io=ba.openio(mako and "home" or "disk")
+   if authToken == "" then authToken=nil end
+   if authToken then
+      local valid,validationErr=validateMcpToken(authToken)
+      if not valid then return nil,validationErr end
+      authToken=valid
+   end
    local key=ba.crypto.hash"sha256"(ba.tpm.uniquekey("LSP-Claw-Keys",32))(true)
    local iv = "0123456789AB"
    local gcm=ba.crypto.symmetric("GCM",key,iv)
    local cipher,tag = gcm:encrypt(ba.json.encode{githubToken=githubToken,authToken=authToken})
-   local ok,err=rw.file(io,"LSP-Claw-Keys.bin",tag..cipher)
+   local ok,err=rw.file(settingsIo,"LSP-Claw-Keys.bin",tag..cipher)
    if not ok then return nil,err or "cannot save token settings" end
    GITHUB_TOKEN,MCP_AUTH_TOKEN=githubToken,authToken
    if app.tokensChanged then app.tokensChanged(githubToken,authToken) end
@@ -24,8 +40,7 @@ function app.getSetTokens(githubToken,authToken)
       local ok,err=storeTokens(githubToken,authToken)
       if not ok then return nil,nil,err end
    elseif GITHUB_TOKEN == nil and MCP_AUTH_TOKEN == nil then
-      local io=ba.openio(mako and "home" or "disk")
-      local data=rw.file(io,"LSP-Claw-Keys.bin")
+      local data=rw.file(settingsIo,"LSP-Claw-Keys.bin")
       if data then
          local key=ba.crypto.hash"sha256"(ba.tpm.uniquekey("LSP-Claw-Keys",32))(true)
          local gcm=ba.crypto.symmetric("GCM",key,"0123456789AB")
@@ -54,7 +69,38 @@ if mako then
    end
 end
 
-GITHUB_TOKEN,MCP_AUTH_TOKEN = app.getSetTokens(GITHUB_TOKEN,MCP_AUTH_TOKEN)
+local tokenSettingsErr
+GITHUB_TOKEN,MCP_AUTH_TOKEN,tokenSettingsErr=app.getSetTokens(GITHUB_TOKEN,MCP_AUTH_TOKEN)
+if tokenSettingsErr then error("LSP-Claw token settings failed: "..tostring(tokenSettingsErr)) end
+
+local adminCredentials,adminErr=require"admin_credentials".create(settingsIo)
+if not adminCredentials then error("LSP-Claw startup failed: "..tostring(adminErr)) end
+app.adminCredentials=adminCredentials
+
+local bootstrapOk,bootstrapErr=pcall(function()
+   require"bootstrap".run{
+      argv=mako and mako.argv or {},
+      admin=adminCredentials,
+      validateToken=validateMcpToken,
+      saveToken=function(token) return storeTokens(GITHUB_TOKEN,token) end
+   }
+end)
+if not bootstrapOk then
+   trace("LSP-Claw command-line bootstrap failed: "..tostring(bootstrapErr))
+   error(bootstrapErr,0)
+end
+
+function app.configAdminConfigured()
+   return adminCredentials:configured()
+end
+
+function app.isConfigAdminUser(username)
+   return adminCredentials:isAdministrator(username)
+end
+
+function app.authenticateConfigAdmin(username,password)
+   return adminCredentials:authenticate(username,password)
+end
 
 if GITHUB_TOKEN then
    tracep(5, "Using GitHub token for authenticated API requests")
@@ -176,6 +222,7 @@ local function getConfigurationStatus()
    return {
       githubTokenSet = tokenConfigured(GITHUB_TOKEN),
       mcpAuthTokenSet = tokenConfigured(MCP_AUTH_TOKEN),
+      browserAdminConfigured = adminCredentials:configured(),
       setupBaseUri = baseUri
    }
 end
@@ -192,8 +239,12 @@ require"lspclaw".register(mcp, ghio, info, appmgr, {
 
 local function authorizeArchiveRequest(cmd)
    if not MCP_AUTH_TOKEN then return true end
-   if cmd:user() == "lsp-claw-admin" then return true end
+   if adminCredentials:isAdministrator(cmd:user()) then return true end
    return cmd:header"Authorization" == "Bearer "..MCP_AUTH_TOKEN
+end
+
+local function authorizeBrowserAdminRequest(cmd)
+   return adminCredentials:isAdministrator(cmd:user())
 end
 
 local function archivePath(ticket)
@@ -246,7 +297,7 @@ function app.setBrowserLabRunning(labName,running)
 end
 
 function app.labApiService(cmd,response)
-   if not authorizeArchiveRequest(cmd) then sendJson(response,401,{ok=false,error="Unauthorized"}) return end
+   if not authorizeBrowserAdminRequest(cmd) then sendJson(response,401,{ok=false,error="Unauthorized"}) return end
    if cmd:method() ~= "POST" then sendJson(response,405,{ok=false,error="Method not allowed"}) return end
    if cmd:data("action") == "setRunning" then
       local value=cmd:data("running")

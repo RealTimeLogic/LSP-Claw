@@ -18,29 +18,30 @@ local function trimToNil(value)
    return value
 end
 
-local adminUser = "lsp-claw-admin"
 local githubToken, authToken = app.getSetTokens()
 local githubTokenInput = githubToken
+local authTokenInput = authToken
 local action = request:data("action")
-local message, errorMessage, githubTokenError
+local message, errorMessage, githubTokenError, authTokenError
 
 if action == "logout" then
    request:logout()
 end
 
 local user = request:user()
-local authRequired = authToken ~= nil and authToken ~= ""
-local authorized = not authRequired or user == adminUser
+local adminConfigured = app.configAdminConfigured()
+local authorized = adminConfigured and app.isConfigAdminUser(user)
 
-if action == "login" and authRequired then
-   local loginToken = request:data("loginToken")
-   if loginToken == authToken then
-      request:login(adminUser, 1, true)
+if action == "login" and adminConfigured then
+   local username = request:data("username")
+   local password = request:data("password")
+   if app.authenticateConfigAdmin(username,password) then
+      request:login(username,1,true)
       user = request:user()
-      authorized = true
-      message = "Signed in."
+      authorized = app.isConfigAdminUser(user)
+      if authorized then message = "Signed in." else errorMessage = "Unable to create an authenticated session." end
    else
-      errorMessage = "Invalid authentication token."
+      errorMessage = "Invalid username or password."
    end
 end
 
@@ -48,9 +49,13 @@ if action == "save" and authorized then
    local newGithubToken = trimToNil(request:data("githubToken"))
    local newAuthToken = trimToNil(request:data("authToken"))
    githubTokenInput = newGithubToken
-   local tokenValid,validation
+   authTokenInput = newAuthToken
+   local tokenValid,validation,mcpTokenValid
    if newGithubToken then tokenValid,validation=app.validateGitHubToken(newGithubToken) end
-   if newGithubToken and not tokenValid then
+   if newAuthToken then mcpTokenValid,authTokenError=app.validateMcpToken(newAuthToken) end
+   if newAuthToken and not mcpTokenValid then
+      errorMessage="Token settings were not saved; the previous settings remain active."
+   elseif newGithubToken and not tokenValid then
       githubTokenError=validation or "GitHub rejected this token."
       errorMessage="Token settings were not saved; the previous settings remain active."
    else
@@ -60,8 +65,8 @@ if action == "save" and authorized then
       else
          githubToken, authToken = app.getSetTokens()
          githubTokenInput = githubToken
-         authRequired = authToken ~= nil and authToken ~= ""
-         authorized = not authRequired or user == adminUser
+         authTokenInput = authToken
+         authorized = app.isConfigAdminUser(user)
          local login=validation and validation.login
          message = login and ("Token settings saved. GitHub token validated for "..login..".") or "Token settings saved."
       end
@@ -111,7 +116,18 @@ local authSet = authToken ~= nil and authToken ~= ""
          <p class="error"><?lsp= html(errorMessage) ?></p>
          <?lsp end ?>
 
-         <?lsp if not authorized then ?>
+         <?lsp if not adminConfigured then ?>
+         <section class="panel login-card">
+            <div class="panel-head">
+               <h2>Administrator setup required</h2>
+            </div>
+            <div class="panel-body">
+               <p>Restart LSP-Claw once with <code>-credentials username:password</code>
+               or <code>-credentials-file &lt;absolute-path&gt;</code> to create the
+               browser configuration administrator.</p>
+            </div>
+         </section>
+         <?lsp elseif not authorized then ?>
          <section class="panel login-card">
             <div class="panel-head">
                <h2>Sign in</h2>
@@ -119,8 +135,10 @@ local authSet = authToken ~= nil and authToken ~= ""
             <div class="panel-body">
                <form method="post" autocomplete="off">
                   <input type="hidden" name="action" value="login">
-                  <label for="loginToken">Authentication token</label>
-                  <input id="loginToken" name="loginToken" type="password" autocomplete="current-password" autofocus>
+                  <label for="username">Username</label>
+                  <input id="username" name="username" type="text" autocomplete="username" autofocus>
+                  <label for="password">Password</label>
+                  <input id="password" name="password" type="password" autocomplete="current-password">
                   <div class="actions">
                      <button type="submit">Continue</button>
                   </div>
@@ -146,8 +164,11 @@ local authSet = authToken ~= nil and authToken ~= ""
                      </div>
                      <div>
                         <label for="authToken">MCP authentication token</label>
-                        <input id="authToken" name="authToken" type="password" autocomplete="off" value="<?lsp= html(authToken) ?>">
+                        <input id="authToken" name="authToken" type="password" autocomplete="off" value="<?lsp= html(authTokenInput) ?>"<?lsp= authTokenError and ' aria-invalid="true" aria-describedby="authTokenError"' or "" ?>>
                         <p class="field-note">Leave blank to disable bearer-token authentication.</p>
+                        <?lsp if authTokenError then ?>
+                        <p class="field-error" id="authTokenError" role="alert"><?lsp= html(authTokenError) ?></p>
+                        <?lsp end ?>
                      </div>
                   </div>
                   <div class="token-tools">
@@ -157,7 +178,7 @@ local authSet = authToken ~= nil and authToken ~= ""
                      <button type="submit">Save tokens</button>
                   </div>
                </form>
-               <?lsp if authSet then ?>
+               <?lsp if adminConfigured then ?>
                <form method="post" autocomplete="off" class="actions">
                   <input type="hidden" name="action" value="logout">
                   <button class="secondary" type="submit">Sign out</button>

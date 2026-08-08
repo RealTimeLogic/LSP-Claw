@@ -13,6 +13,8 @@ $stdout = Join-Path $stage "stdout.log"
 $stderr = Join-Path $stage "stderr.log"
 $script:requestId = 0
 $script:testToken = "lsp-claw-regression-token"
+$script:adminUsername = "lsp-claw-regression-admin"
+$script:adminPassword = "lsp-claw-regression-password"
 $previousAuthToken = $env:MCP_AUTH_TOKEN
 $env:MCP_AUTH_TOKEN = $script:testToken
 $process = $null
@@ -114,7 +116,7 @@ function Assert-ZipUploadRejected([string]$Url,[string]$ZipPath,[string]$Message
 }
 
 try {
-   $process = Start-Process -FilePath $Mako -ArgumentList "-llsp-claw::www" -WorkingDirectory $stage -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+   $process = Start-Process -FilePath $Mako -ArgumentList @("-llsp-claw::www","-credentials","$($script:adminUsername):$($script:adminPassword)") -WorkingDirectory $stage -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
    $deadline = (Get-Date).AddSeconds(15)
    do {
       Start-Sleep -Milliseconds 200
@@ -135,8 +137,10 @@ try {
    }
    finally { $rootResponse.Dispose() }
    $setupPage = Invoke-WebRequest -UseBasicParsing -Uri "$origin/lsp-claw/lsp-claw-config.lsp" -SessionVariable BrowserSession
-   if ($setupPage.Content -notmatch "Sign in") { throw "token-protected browser page did not require login" }
-   $setupPage = Invoke-WebRequest -UseBasicParsing -Uri "$origin/lsp-claw/lsp-claw-config.lsp" -Method Post -WebSession $BrowserSession -Body @{action="login";loginToken=$script:testToken}
+   if ($setupPage.Content -notmatch "Sign in") { throw "administrator-protected browser page did not require login" }
+   $bearerLogin = Invoke-WebRequest -UseBasicParsing -Uri "$origin/lsp-claw/lsp-claw-config.lsp" -Method Post -WebSession $BrowserSession -Body @{action="login";username=$script:adminUsername;password=$script:testToken}
+   if ($bearerLogin.Content -notmatch "Invalid username or password") { throw "MCP bearer token was accepted as the browser password" }
+   $setupPage = Invoke-WebRequest -UseBasicParsing -Uri "$origin/lsp-claw/lsp-claw-config.lsp" -Method Post -WebSession $BrowserSession -Body @{action="login";username=$script:adminUsername;password=$script:adminPassword}
    if ($setupPage.Content -notmatch "Lab archives" -or $setupPage.Content -notmatch "Upload and import ZIP") { throw "browser lab manager did not render" }
    $session1 = New-McpSession
    $session2 = New-McpSession

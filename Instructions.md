@@ -160,6 +160,10 @@ mako -l::Xedge.zip -l::lsp-claw.zip # Include Xedge, MCP URL http://localhost/mc
 mako -l::Xedge.zip # Only Xedge, MCP URL http://localhost/lsp-claw/mcp.lsp
 ```
 
+On the first Mako start, add `-credentials` or `-credentials-file` to create
+the browser configuration administrator. See
+[Command-Line Credential Bootstrap](#command-line-credential-bootstrap).
+
 In the last example, LSP-Claw is not loaded when Mako Server starts. Instead,
 LSP-Claw is installed as an Xedge application the first time Xedge runs. For
 this option, follow the same installation procedure used for the standalone
@@ -199,6 +203,58 @@ The MCP server endpoint will therefore be:
 ```text
 http://ip-address/lsp-claw/mcp.lsp
 ```
+
+## Command-Line Credential Bootstrap
+
+LSP-Claw uses separate credentials for its two protected surfaces:
+
+- A browser administrator username and password protects the configuration and
+  browser lab-management page.
+- An MCP bearer token protects `mcp.lsp` for AI agents.
+
+These credentials are not interchangeable. Creating a browser session does not
+authorize MCP requests, and the MCP token is not accepted as the browser
+password.
+
+Create the first browser administrator when starting Mako:
+
+```text
+mako -l::lsp-claw.zip -credentials admin:your-password
+```
+
+You can set the MCP bearer token at the same time. It must contain 16 to 4096
+bytes and cannot contain NUL, CR, or LF characters:
+
+```text
+mako -l::lsp-claw.zip -credentials admin:your-password -token your-mcp-bearer-token
+```
+
+For services and public VPS deployments, use files so secrets are not exposed
+in command history or process listings:
+
+```text
+mako -l::lsp-claw.zip -credentials-file C:\secrets\lsp-claw-credentials.txt -token-file C:\secrets\lsp-claw-token.txt
+```
+
+Use absolute native file paths. Each file must contain one line. The credentials
+file contains `username:password`; the token file contains only the bearer
+token. Restrict both files so they are readable only by the operating-system
+account running Mako. An optional UTF-8 BOM and the final CR/LF are accepted.
+
+Bootstrap is one-time. Once `LSP-Claw-Admin.bin` contains an administrator, all
+four command-line bootstrap options are ignored and cannot replace either the
+administrator or MCP token. Browser credentials are TPM-encrypted in
+`LSP-Claw-Admin.bin`; GitHub and MCP tokens remain encrypted in
+`LSP-Claw-Keys.bin`.
+
+For an existing installation that already has GitHub or MCP token settings but
+no browser administrator, restart it once with `-credentials` or
+`-credentials-file`. Existing tokens are preserved. Until an administrator is
+created, the browser page shows setup instructions instead of exposing token or
+lab settings.
+
+See [Credential Bootstrap](doc/Credential-Bootstrap.md) for complete option,
+validation, upgrade, and security details.
 
 ## Configure Tokens
 
@@ -286,11 +342,11 @@ http://localhost/lsp-claw/lsp-claw-config.lsp
 
 Requests to the application root or `index.lsp` redirect to the canonical
 `lsp-claw-config.lsp` page. The configuration page lets you set either token,
-both tokens, or neither token. Leave a field blank to store no value for that
-token. If an MCP authentication token is already configured, the configuration
-page uses that token as the login token before it shows the token form. Its lab
-list also provides a per-lab **Start lab** or **Stop lab** button, so the app
-runtime can be controlled without an AI agent.
+both tokens, or neither token. Sign in with the browser administrator created by
+the one-time command-line bootstrap. Leave a token field blank to store no value
+for that token. Saving or clearing the MCP token never changes the browser
+administrator. The lab list also provides a per-lab **Start lab** or **Stop
+lab** button, so the app runtime can be controlled without an AI agent.
 
 The same page provides these lab-management controls:
 

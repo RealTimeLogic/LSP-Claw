@@ -5,6 +5,7 @@ the repository root before packaging a modified checkout:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/fastmcp/Test-FastMCP.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-CredentialBootstrap.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-TokenSetup.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-management/Test-LabManagement.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-archive/Test-LabArchive.ps1
@@ -15,13 +16,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-LSP-Claw.ps1
 The harnesses perform these tests in order:
 
 1. Isolate and test generic FastMCP.
-2. Verify the browser configuration page, GitHub-token validation, redirects,
+2. Verify command-line browser credentials, MCP-token bootstrap, encrypted
+   persistence, one-time behavior, file inputs, upgrade, and auth separation.
+3. Verify the browser configuration page, GitHub-token validation, redirects,
    ZIP upload, and browser lab start/stop.
-3. Test lab-management behavior in an isolated temporary Mako home.
-4. Verify stored ZIP generation and ZipIo decompression independently.
-5. Start two independently authenticated servers and verify direct
+4. Test lab-management behavior in an isolated temporary Mako home.
+5. Verify stored ZIP generation and ZipIo decompression independently.
+6. Start two independently authenticated servers and verify direct
    destination-pull transfer.
-6. Start the complete LSP-Claw application and verify Streamable HTTP, multiple
+7. Start the complete LSP-Claw application and verify Streamable HTTP, multiple
    labs, routes, browser and MCP archives, timestamps, staged replacement, and
    security boundaries.
 

@@ -392,6 +392,7 @@ local function configurationStatus(ctx)
    local origin = requestOrigin(ctx)
    local githubTokenSet = status.githubTokenSet == true
    local mcpAuthTokenSet = status.mcpAuthTokenSet == true
+   local browserAdminConfigured = status.browserAdminConfigured == true
    local warnings = {}
    if not githubTokenSet then
       tinsert(warnings, "No GitHub token is configured. Public GitHub access can still work, but requests are unauthenticated and may be rate limited.")
@@ -399,7 +400,14 @@ local function configurationStatus(ctx)
    if not mcpAuthTokenSet then
       tinsert(warnings, "No MCP authentication token is configured. Any client that can reach this MCP endpoint can use the server.")
    end
+   if not browserAdminConfigured then
+      tinsert(warnings, "No browser configuration administrator is configured. Restart LSP-Claw once with -credentials or -credentials-file before using the browser settings page.")
+   end
    return {
+      browserAdministrator = {
+	 configured = browserAdminConfigured,
+	 purpose = "Authenticates access to the browser configuration and lab-management page."
+      },
       tokens = {
 	 github = {
 	    configured = githubTokenSet,
