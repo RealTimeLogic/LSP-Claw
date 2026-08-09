@@ -19,25 +19,21 @@ local function trimToNil(value)
 end
 
 local githubToken, authToken = app.getSetTokens()
-local settingsUser = "lsp-claw-admin"
 local githubTokenInput = githubToken
 local authTokenInput = authToken
 local action = request:data("action")
 local message, errorMessage, githubTokenError, authTokenError
 
 if action == "logout" then
-   request:logout()
+   app.settingsSession(request,false)
 end
 
-local user = request:user()
 local authRequired = authToken ~= nil and authToken ~= ""
-local authorized = not authRequired or user == settingsUser
+local authorized = not authRequired or app.settingsSession(request)
 
 if action == "login" and authRequired then
    if request:data("loginToken") == authToken then
-      request:login(settingsUser,1,true)
-      user = request:user()
-      authorized = user == settingsUser
+      authorized = app.settingsSession(request,true)
       if authorized then message = "Signed in." else errorMessage = "Unable to create an authenticated session." end
    else
       errorMessage = "Invalid authentication token."
@@ -66,7 +62,7 @@ if action == "save" and authorized then
          githubTokenInput = githubToken
          authTokenInput = authToken
          authRequired = authToken ~= nil and authToken ~= ""
-         authorized = not authRequired or user == settingsUser
+         authorized = not authRequired or app.settingsSession(request)
          local login=validation and validation.login
          message = login and ("Token settings saved. GitHub token validated for "..login..".") or "Token settings saved."
       end

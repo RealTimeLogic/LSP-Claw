@@ -380,9 +380,11 @@ http://<mcp-server-address>/lsp-claw-config.lsp
 
 The application root and `index.lsp` redirect to this canonical page. Settings
 are open when no MCP token exists. When one exists, token login creates the
-browser session used by the settings and lab-management APIs. The MCP
-authorization callback never accepts that browser session and continues to
-compare only the `Authorization: Bearer` value.
+application-specific session authorization used by the settings and
+lab-management APIs. This marker is bound to the current token and coexists
+with Xedge or FuguHub identity fields in the same Mako session. The MCP
+authorization callback never accepts browser-session authorization and
+continues to compare only the `Authorization: Bearer` value.
 
 LSP-Claw enables `GitHubIo`'s public archive fallback with a writable cache IO.
 When no GitHub token is configured, example `stat`, directory iteration, and

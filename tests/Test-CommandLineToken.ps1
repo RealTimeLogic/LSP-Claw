@@ -21,6 +21,8 @@ function New-Runtime([string]$Name) {
    $path = Join-Path $root $Name
    New-Item -ItemType Directory -Path $path -Force | Out-Null
    Copy-Item -LiteralPath (Join-Path $repo "www") -Destination (Join-Path $path "www") -Recurse
+   $hostLogin = '<?lsp if request:data("login") then request:login("host-user",2,true) end local u=request:user() or "" response:setheader("Content-Length",tostring(#u)) response:send(u) ?>'
+   [IO.File]::WriteAllText((Join-Path $path "www\host-login.lsp"),$hostLogin,[Text.UTF8Encoding]::new($false))
    [IO.File]::WriteAllText((Join-Path $path "mako.conf"),"port=$Port`r`nsslport=0`r`n",[Text.UTF8Encoding]::new($false))
    return $path
 }
@@ -120,7 +122,24 @@ try {
    $loginPage = Invoke-WebRequest -UseBasicParsing -Uri ($server.BaseUri + "lsp-claw-config.lsp")
    Assert-True ($loginPage.Content -match "Authentication token") "Configured token did not protect the settings page"
    Assert-True ((Login-Token $server "wrong-command-token").Response.Content -match "Invalid authentication token") "Wrong settings token was accepted"
-   $login = Login-Token $server $token
+
+   # A pre-existing Xedge/CMS-style identity coexists with LSP-Claw settings
+   # authorization instead of causing request:login to fail.
+   $hostSession = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
+   $hostIdentity = Invoke-WebRequest -UseBasicParsing -Uri ($server.BaseUri + "host-login.lsp?login=true") -WebSession $hostSession
+   Assert-True ($hostIdentity.Content -eq "host-user") "Test host identity was not created"
+   $hostLogin = Invoke-WebRequest -UseBasicParsing -Uri ($server.BaseUri + "lsp-claw-config.lsp") -Method Post -WebSession $hostSession -Body @{action="login";loginToken=$token}
+   Assert-True ($hostLogin.Content -match "Token settings") "Existing host identity prevented LSP-Claw login"
+   $replacedIdentity = Invoke-WebRequest -UseBasicParsing -Uri ($server.BaseUri + "host-login.lsp") -WebSession $hostSession
+   Assert-True ($replacedIdentity.Content -eq "host-user") "LSP-Claw login changed the existing host identity"
+
+   $logout = Invoke-WebRequest -UseBasicParsing -Uri ($server.BaseUri + "lsp-claw-config.lsp") -Method Post -WebSession $hostSession -Body @{action="logout"}
+   Assert-True ($logout.Content -match "Sign in") "LSP-Claw logout did not clear its settings authorization"
+   $remainingIdentity = Invoke-WebRequest -UseBasicParsing -Uri ($server.BaseUri + "host-login.lsp") -WebSession $hostSession
+   Assert-True ($remainingIdentity.Content -eq "host-user") "LSP-Claw logout changed the existing host identity"
+   $hostLogin = Invoke-WebRequest -UseBasicParsing -Uri ($server.BaseUri + "lsp-claw-config.lsp") -Method Post -WebSession $hostSession -Body @{action="login";loginToken=$token}
+
+   $login = [pscustomobject]@{Session=$hostSession;Response=$hostLogin}
    Assert-True ($login.Response.Content -match 'id="githubToken"[^>]*value=""') "Command-line MCP token populated the GitHub token field"
    Assert-McpHandshake $server $token
    Assert-True ((Get-McpInitializeStatus $server $null) -in @(401,403)) "Missing MCP token was accepted"
@@ -167,7 +186,7 @@ try {
    Assert-McpHandshake $server $firstToken
    Stop-TestServer $server
 
-   Write-Output "COMMAND_LINE_TOKEN_TEST_PASS mcpOnly=true githubBlank=true encrypted=true oneTime=true firstWins=true githubPreserved=true validation=true browserLogin=true separated=true"
+   Write-Output "COMMAND_LINE_TOKEN_TEST_PASS mcpOnly=true githubBlank=true encrypted=true oneTime=true firstWins=true githubPreserved=true validation=true browserLogin=true sharedSession=true separated=true"
 }
 finally {
    $env:GITHUB_TOKEN=$oldGitHubToken

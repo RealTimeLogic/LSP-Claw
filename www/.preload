@@ -101,6 +101,20 @@ if not tokenOptionOk then
    error(tokenOptionErr,0)
 end
 
+local SETTINGS_SESSION_KEY="lspClawSettingsToken"
+local function settingsSessionMarker()
+   return MCP_AUTH_TOKEN and ba.crypto.hash"sha256"(MCP_AUTH_TOKEN)(true)
+end
+
+function app.settingsSession(cmd,authenticate)
+   local session=authenticate == true and cmd:session(true) or cmd:session()
+   if session and authenticate ~= nil then
+      session[SETTINGS_SESSION_KEY]=authenticate and settingsSessionMarker() or nil
+   end
+   local marker=settingsSessionMarker()
+   return marker ~= nil and session and session[SETTINGS_SESSION_KEY] == marker or false
+end
+
 if GITHUB_TOKEN then
    tracep(5, "Using GitHub token for authenticated API requests")
 else
@@ -237,12 +251,12 @@ require"lspclaw".register(mcp, ghio, info, appmgr, {
 
 local function authorizeArchiveRequest(cmd)
    if not MCP_AUTH_TOKEN then return true end
-   if cmd:user() == "lsp-claw-admin" then return true end
+   if app.settingsSession(cmd) then return true end
    return cmd:header"Authorization" == "Bearer "..MCP_AUTH_TOKEN
 end
 
 local function authorizeBrowserRequest(cmd)
-   return not MCP_AUTH_TOKEN or cmd:user() == "lsp-claw-admin"
+   return not MCP_AUTH_TOKEN or app.settingsSession(cmd)
 end
 
 local function archivePath(ticket)

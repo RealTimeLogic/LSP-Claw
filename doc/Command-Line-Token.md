@@ -19,6 +19,10 @@ When no MCP token exists, the browser settings page is open. Once configured,
 the token also unlocks that page. A browser session never authorizes the MCP
 endpoint; MCP clients must send `Authorization: Bearer <token>`.
 
+Settings authorization uses a token-bound LSP-Claw field in the existing Mako
+session. It therefore coexists with Xedge and FuguHub identities, and LSP-Claw
+logout clears only LSP-Claw authorization.
+
 Direct command-line secrets may be visible in command history and process
 listings.
 

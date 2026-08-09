@@ -218,6 +218,8 @@ token exists, later `-token` arguments are ignored and cannot replace it.
 The settings page opens directly when no MCP token exists. When a token is
 configured, use that token to sign in. The resulting browser session does not
 authorize MCP requests; MCP clients must still send `Authorization: Bearer`.
+This settings authorization coexists with Xedge or FuguHub login in the same
+Mako server. Signing in or out of LSP-Claw does not replace their user session.
 
 Direct command-line secrets may be visible in command history and process
 listings. This is an accepted limitation of the minimal bootstrap.
@@ -314,7 +316,9 @@ Requests to the application root or `index.lsp` redirect to the canonical
 both tokens, or neither token. When an MCP token is configured, use it to sign
 in. Leave a token field blank to store no value for that token. The lab list
 also provides a per-lab **Start lab** or **Stop lab** button, so the app runtime
-can be controlled without an AI agent.
+can be controlled without an AI agent. LSP-Claw stores its authorization in an
+application-specific session field, so an existing Xedge or FuguHub login does
+not interfere with this page.
 
 The same page provides these lab-management controls:
 
