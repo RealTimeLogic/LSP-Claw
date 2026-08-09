@@ -19,7 +19,7 @@ local function trimToNil(value)
 end
 
 local githubToken, authToken = app.getSetTokens()
-local legacyAdminUser = "lsp-claw-admin"
+local settingsUser = "lsp-claw-admin"
 local githubTokenInput = githubToken
 local authTokenInput = authToken
 local action = request:data("action")
@@ -30,27 +30,14 @@ if action == "logout" then
 end
 
 local user = request:user()
-local adminConfigured = app.configAdminConfigured()
-local authRequired = adminConfigured or (authToken ~= nil and authToken ~= "")
-local authorized = adminConfigured and app.isConfigAdminUser(user) or
-   (not adminConfigured and (not authRequired or user == legacyAdminUser))
+local authRequired = authToken ~= nil and authToken ~= ""
+local authorized = not authRequired or user == settingsUser
 
 if action == "login" and authRequired then
-   if adminConfigured then
-      local username = request:data("username")
-      local password = request:data("password")
-      if app.authenticateConfigAdmin(username,password) then
-         request:login(username,1,true)
-         user = request:user()
-         authorized = app.isConfigAdminUser(user)
-         if authorized then message = "Signed in." else errorMessage = "Unable to create an authenticated session." end
-      else
-         errorMessage = "Invalid username or password."
-      end
-   elseif request:data("loginToken") == authToken then
-      request:login(legacyAdminUser,1,true)
+   if request:data("loginToken") == authToken then
+      request:login(settingsUser,1,true)
       user = request:user()
-      authorized = user == legacyAdminUser
+      authorized = user == settingsUser
       if authorized then message = "Signed in." else errorMessage = "Unable to create an authenticated session." end
    else
       errorMessage = "Invalid authentication token."
@@ -78,9 +65,8 @@ if action == "save" and authorized then
          githubToken, authToken = app.getSetTokens()
          githubTokenInput = githubToken
          authTokenInput = authToken
-         authRequired = adminConfigured or (authToken ~= nil and authToken ~= "")
-         authorized = adminConfigured and app.isConfigAdminUser(user) or
-            (not adminConfigured and (not authRequired or user == legacyAdminUser))
+         authRequired = authToken ~= nil and authToken ~= ""
+         authorized = not authRequired or user == settingsUser
          local login=validation and validation.login
          message = login and ("Token settings saved. GitHub token validated for "..login..".") or "Token settings saved."
       end
@@ -138,15 +124,8 @@ local authSet = authToken ~= nil and authToken ~= ""
             <div class="panel-body">
                <form method="post" autocomplete="off">
                   <input type="hidden" name="action" value="login">
-                  <?lsp if adminConfigured then ?>
-                     <label for="username">Username</label>
-                     <input id="username" name="username" type="text" autocomplete="username" autofocus>
-                     <label for="password">Password</label>
-                     <input id="password" name="password" type="password" autocomplete="current-password">
-                  <?lsp else ?>
-                     <label for="loginToken">Authentication token</label>
-                     <input id="loginToken" name="loginToken" type="password" autocomplete="current-password" autofocus>
-                  <?lsp end ?>
+                  <label for="loginToken">Authentication token</label>
+                  <input id="loginToken" name="loginToken" type="password" autocomplete="current-password" autofocus>
                   <div class="actions">
                      <button type="submit">Continue</button>
                   </div>

@@ -73,61 +73,32 @@ local tokenSettingsErr
 GITHUB_TOKEN,MCP_AUTH_TOKEN,tokenSettingsErr=app.getSetTokens(GITHUB_TOKEN,MCP_AUTH_TOKEN)
 if tokenSettingsErr then error("LSP-Claw token settings failed: "..tostring(tokenSettingsErr)) end
 
-local adminCredentials,adminErr=require"admin_credentials".create(settingsIo)
-if not adminCredentials then error("LSP-Claw startup failed: "..tostring(adminErr)) end
-
-local function bootstrap()
-   local credentials,token
+local function initializeCommandLineToken()
    for ix,arg in ipairs(mako and mako.argv or {}) do
-      if (arg == "-credentials" and not credentials) or
-         (arg == "-token" and not token) then
-         if adminCredentials:configured() then
-            trace("LSP-Claw command-line bootstrap ignored: an administrator already exists")
+      if arg == "-token" then
+         if MCP_AUTH_TOKEN then
+            trace("LSP-Claw command-line token ignored: an MCP token already exists")
             return
          end
-         local value=mako.argv[ix+1]
-         if type(value) ~= "string" or value == "" or value:sub(1,1) == "-" then
-            error("LSP-Claw bootstrap option "..arg.." requires a value",2)
+         local token=mako.argv[ix+1]
+         if type(token) ~= "string" or token == "" or token:sub(1,1) == "-" then
+            error("LSP-Claw command-line option -token requires a value",2)
          end
-         if arg == "-credentials" then credentials=value else token=value end
+         local valid,err=validateMcpToken(token)
+         if not valid then error(err,2) end
+         local ok
+         ok,err=storeTokens(GITHUB_TOKEN,valid)
+         if not ok then error("LSP-Claw MCP token setup failed: "..tostring(err),2) end
+         trace("LSP-Claw command-line token enabled MCP authentication")
+         return
       end
    end
-   if not credentials and not token then return end
-   if not credentials then error("LSP-Claw command-line bootstrap requires -credentials",2) end
-   local sep=credentials:find(":",1,true)
-   if not sep or sep == 1 or sep == #credentials then
-      error("LSP-Claw bootstrap credentials must use username:password",2)
-   end
-   if token then
-      local valid,err=validateMcpToken(token)
-      if not valid then error(err,2) end
-   end
-   local ok,err=adminCredentials:create(credentials:sub(1,sep-1),credentials:sub(sep+1))
-   if not ok then error("LSP-Claw administrator bootstrap failed: "..tostring(err),2) end
-   if token then
-      ok,err=storeTokens(GITHUB_TOKEN,token)
-      if not ok then error("LSP-Claw MCP token bootstrap failed: "..tostring(err),2) end
-   end
-   trace("LSP-Claw command-line bootstrap created the first browser administrator")
-   if token then trace("LSP-Claw command-line bootstrap enabled MCP authentication") end
 end
 
-local bootstrapOk,bootstrapErr=pcall(bootstrap)
-if not bootstrapOk then
-   trace("LSP-Claw command-line bootstrap failed: "..tostring(bootstrapErr))
-   error(bootstrapErr,0)
-end
-
-function app.configAdminConfigured()
-   return adminCredentials:configured()
-end
-
-function app.isConfigAdminUser(username)
-   return adminCredentials:isAdministrator(username)
-end
-
-function app.authenticateConfigAdmin(username,password)
-   return adminCredentials:authenticate(username,password)
+local tokenOptionOk,tokenOptionErr=pcall(initializeCommandLineToken)
+if not tokenOptionOk then
+   trace("LSP-Claw command-line token failed: "..tostring(tokenOptionErr))
+   error(tokenOptionErr,0)
 end
 
 if GITHUB_TOKEN then
@@ -250,7 +221,6 @@ local function getConfigurationStatus()
    return {
       githubTokenSet = tokenConfigured(GITHUB_TOKEN),
       mcpAuthTokenSet = tokenConfigured(MCP_AUTH_TOKEN),
-      browserAdminConfigured = adminCredentials:configured(),
       setupBaseUri = baseUri
    }
 end
@@ -267,15 +237,11 @@ require"lspclaw".register(mcp, ghio, info, appmgr, {
 
 local function authorizeArchiveRequest(cmd)
    if not MCP_AUTH_TOKEN then return true end
-   if adminCredentials:isAdministrator(cmd:user()) then return true end
-   if not adminCredentials:configured() and cmd:user() == "lsp-claw-admin" then return true end
+   if cmd:user() == "lsp-claw-admin" then return true end
    return cmd:header"Authorization" == "Bearer "..MCP_AUTH_TOKEN
 end
 
-local function authorizeBrowserAdminRequest(cmd)
-   if adminCredentials:configured() then
-      return adminCredentials:isAdministrator(cmd:user())
-   end
+local function authorizeBrowserRequest(cmd)
    return not MCP_AUTH_TOKEN or cmd:user() == "lsp-claw-admin"
 end
 
@@ -329,7 +295,7 @@ function app.setBrowserLabRunning(labName,running)
 end
 
 function app.labApiService(cmd,response)
-   if not authorizeBrowserAdminRequest(cmd) then sendJson(response,401,{ok=false,error="Unauthorized"}) return end
+   if not authorizeBrowserRequest(cmd) then sendJson(response,401,{ok=false,error="Unauthorized"}) return end
    if cmd:method() ~= "POST" then sendJson(response,405,{ok=false,error="Method not allowed"}) return end
    if cmd:data("action") == "setRunning" then
       local value=cmd:data("running")

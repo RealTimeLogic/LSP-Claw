@@ -160,9 +160,8 @@ mako -l::Xedge.zip -l::lsp-claw.zip # Include Xedge, MCP URL http://localhost/mc
 mako -l::Xedge.zip # Only Xedge, MCP URL http://localhost/lsp-claw/mcp.lsp
 ```
 
-On the first Mako start, you may add `-credentials` to create an optional
-browser configuration administrator. See
-[Command-Line Credential Bootstrap](#command-line-credential-bootstrap).
+On the first Mako start, you may add `-token` to initialize MCP authentication.
+See [Command-Line MCP Token](#command-line-mcp-token).
 
 In the last example, LSP-Claw is not loaded when Mako Server starts. Instead,
 LSP-Claw is installed as an Xedge application the first time Xedge runs. For
@@ -204,51 +203,27 @@ The MCP server endpoint will therefore be:
 http://ip-address/lsp-claw/mcp.lsp
 ```
 
-## Command-Line Credential Bootstrap
+## Command-Line MCP Token
 
-Command-line bootstrap is optional. When used, LSP-Claw separates credentials
-for its two protected surfaces:
-
-- A browser administrator username and password protects the configuration and
-  browser lab-management page.
-- An MCP bearer token protects `mcp.lsp` for AI agents.
-
-Creating a browser session never authorizes MCP requests. When a command-line
-administrator exists, the MCP token is not accepted as its browser password.
-
-To create a browser administrator, supply `-credentials` when starting Mako:
+The optional `-token` argument initializes the MCP bearer token on first start:
 
 ```text
-mako -l::lsp-claw.zip -credentials admin:your-password
+mako -l::lsp-claw.zip -token your-mcp-bearer-token
 ```
 
-You can set the MCP bearer token at the same time. It must contain 16 to 4096
-bytes and cannot contain NUL, CR, or LF characters:
+The token must contain 16 to 4096 bytes and cannot contain NUL, CR, or LF. It
+sets only MCP authentication; the GitHub token remains unchanged. Once an MCP
+token exists, later `-token` arguments are ignored and cannot replace it.
 
-```text
-mako -l::lsp-claw.zip -credentials admin:your-password -token your-mcp-bearer-token
-```
-
-Bootstrap is one-time. Once `LSP-Claw-Admin.bin` contains an administrator, all
-later `-credentials` and `-token` values are ignored and cannot replace either
-the administrator or MCP token. Browser credentials are TPM-encrypted in
-`LSP-Claw-Admin.bin`; GitHub and MCP tokens remain encrypted in
-`LSP-Claw-Keys.bin`.
-
-If `-credentials` is omitted, the original settings page remains available.
-It opens directly when no MCP token exists. If an MCP token is already
-configured, that token unlocks the settings page as it did before command-line
-bootstrap was added. This browser session still cannot authorize MCP requests.
-
-An existing installation with GitHub or MCP token settings can optionally add
-an administrator by restarting once with `-credentials`; its tokens are
-preserved.
+The settings page opens directly when no MCP token exists. When a token is
+configured, use that token to sign in. The resulting browser session does not
+authorize MCP requests; MCP clients must still send `Authorization: Bearer`.
 
 Direct command-line secrets may be visible in command history and process
 listings. This is an accepted limitation of the minimal bootstrap.
 
-See [Credential Bootstrap](doc/Credential-Bootstrap.md) for validation,
-upgrade, and security details.
+See [Command-Line MCP Token](doc/Command-Line-Token.md) for validation and
+storage details.
 
 ## Configure Tokens
 
@@ -336,11 +311,10 @@ http://localhost/lsp-claw/lsp-claw-config.lsp
 
 Requests to the application root or `index.lsp` redirect to the canonical
 `lsp-claw-config.lsp` page. The configuration page lets you set either token,
-both tokens, or neither token. Sign in with the browser administrator created by
-the one-time command-line bootstrap. Leave a token field blank to store no value
-for that token. Saving or clearing the MCP token never changes the browser
-administrator. The lab list also provides a per-lab **Start lab** or **Stop
-lab** button, so the app runtime can be controlled without an AI agent.
+both tokens, or neither token. When an MCP token is configured, use it to sign
+in. Leave a token field blank to store no value for that token. The lab list
+also provides a per-lab **Start lab** or **Stop lab** button, so the app runtime
+can be controlled without an AI agent.
 
 The same page provides these lab-management controls:
 

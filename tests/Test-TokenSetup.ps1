@@ -63,7 +63,7 @@ try {
    finally { $rootResponse.Dispose() }
    $loginPage = Invoke-WebRequest -UseBasicParsing -Uri $configUri -SessionVariable BrowserSession
    Assert-True ($loginPage.Content -match "Token settings") "Optional bootstrap absence hid the original settings page"
-   Assert-True ($loginPage.Content -notmatch "Administrator setup required") "Settings page still required command-line credentials"
+   Assert-True ($loginPage.Content -notmatch "Sign in") "Settings page required a login without an MCP token"
    $invalid = Invoke-WebRequest -UseBasicParsing -Uri $configUri -Method Post -Body @{
       action="save"
       githubToken="invalid-test-token"
@@ -156,16 +156,21 @@ try {
    }
    Assert-True ($stoppedAgain.ok -and -not $stoppedAgain.result.running -and -not $stoppedAgain.result.changed) "Browser lab stop was not idempotent"
 
-   Assert-True (-not (Test-Path -LiteralPath (Join-Path $stage "LSP-Claw-Admin.bin"))) "Using the original settings page created an administrator"
-   Write-Output "TOKEN_SETUP_TEST_PASS optionalBootstrap=true invalidRejected=true mcpValidation=true validAccepted=true activated=true clear=true labStartStop=true"
+   Write-Output "TOKEN_SETUP_TEST_PASS openWithoutToken=true invalidRejected=true mcpValidation=true validAccepted=true activated=true clear=true labStartStop=true"
 }
 finally {
    $env:LSP_CLAW_GITHUB_API = $oldGitHubApi
    $env:GITHUB_TOKEN = $oldGitHubToken
    $env:GH_TOKEN = $oldGhToken
    $env:MCP_AUTH_TOKEN = $oldMcpToken
-   if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force }
-   if ($mockProcess -and -not $mockProcess.HasExited) { Stop-Process -Id $mockProcess.Id -Force }
+   if ($process -and -not $process.HasExited) {
+      Stop-Process -Id $process.Id -Force
+      $process.WaitForExit()
+   }
+   if ($mockProcess -and -not $mockProcess.HasExited) {
+      Stop-Process -Id $mockProcess.Id -Force
+      $mockProcess.WaitForExit()
+   }
    if (Test-Path -LiteralPath $stage) {
       $resolved = (Resolve-Path -LiteralPath $stage).Path
       $tempRoot = (Resolve-Path -LiteralPath $env:TEMP).Path

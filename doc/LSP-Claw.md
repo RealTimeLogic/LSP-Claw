@@ -21,8 +21,8 @@ Related documents:
   creation, copying, backup, clearing, start, and stop operations.
 - [Lab-Archives.md](Lab-Archives.md) defines complete lab ZIP import/export,
   validation limits, transfer tickets, and staged replacement.
-- [Credential-Bootstrap.md](Credential-Bootstrap.md) defines first-start browser
-  administrator and optional MCP-token provisioning for Mako.
+- [Command-Line-Token.md](Command-Line-Token.md) defines optional
+  command-line MCP-token initialization for Mako.
 - [Instructions.md](../Instructions.md) is the detailed user tutorial and setup
   guide; [README.md](../README.md) is the short Mako Developer Edition quick
   start.
@@ -36,9 +36,8 @@ At startup, `.preload`:
 1. Requires Mako or Xedge.
 2. Creates the app-local Lua loader with `mako.createloader(io)` or
    `xedge.createloader(io)`.
-3. Loads optional GitHub and MCP authentication tokens and the TPM-backed
-   browser administrator store.
-4. Processes one-time Mako credential-bootstrap options.
+3. Loads optional GitHub and MCP authentication tokens.
+4. Processes the optional one-time Mako `-token` argument.
 5. Creates a `GitHubIo` instance for `RealTimeLogic/LSP-Examples`.
 6. Creates the `appmgr` lab manager.
 7. Creates the lab archive manager.
@@ -67,13 +66,13 @@ resources, prompts, lab behavior, and agent-facing instructions.
 
 - Runtime detection and loader setup.
 - Token loading and encrypted token storage through `app.getSetTokens`.
-- Browser-administrator loading and one-time Mako credential bootstrap.
+- Optional one-time Mako MCP-token initialization.
 - GitHub IO creation.
 - Trace capture and trace forwarding.
 - MCP Streamable HTTP transport configuration.
 - Origin and bearer-token authorization.
 - Short-lived archive upload/download services authorized by either the browser
-  administrator session or MCP bearer token, when bearer authentication is
+  settings session or MCP bearer token, when bearer authentication is
   enabled.
 
 ### `www/.lua/lspclaw.lua`
@@ -348,29 +347,26 @@ without editing behavior code.
 
 ## Authentication And Tokens
 
-LSP-Claw has three independent credential concerns:
+LSP-Claw has two token concerns:
 
-- An optional TPM-backed browser administrator for the configuration surface.
 - `GITHUB_TOKEN` or `GH_TOKEN` for outbound GitHub API access.
 - `MCP_AUTH_TOKEN` for inbound MCP bearer-token authentication.
 
 Under Mako, tokens can come from environment variables or `mako.conf`.
 
-The browser administrator is persisted in `LSP-Claw-Admin.bin` by
-`.lua/admin_credentials.lua`, using `ba.tpm.jsonuser` with a device-specific
-key. A small scan in `.preload` handles the one-time `-credentials` and
-`-token` options after the administrator and existing encrypted token settings
-are loaded, but before the browser handlers and MCP transport are finalized.
+A small scan in `.preload` handles the optional one-time `-token` argument after
+existing encrypted token settings are loaded, but before the browser handlers
+and MCP transport are finalized. It changes only the MCP token and preserves the
+GitHub token.
 
 The browser page calls `app.getSetTokens(githubToken, authToken)`. Tokens saved
 this way are stored encrypted using key material derived from
 `ba.tpm.uniquekey`. The shared MCP-token validator requires 16 to 4096 bytes and
 rejects NUL, CR, and LF for both bootstrap and browser saves.
 
-`getRuntimeInfo` reports whether the browser administrator and each token are
-configured, but never returns a credential value. It also returns a
-configuration page URL template derived from `dir:baseuri()`. The normalized
-base URI ends with `/`:
+`getRuntimeInfo` reports whether each token is configured, but never returns a
+token value. It also returns a configuration page URL template derived from
+`dir:baseuri()`. The normalized base URI ends with `/`:
 
 ```text
 http://<mcp-server-address><base-uri>lsp-claw-config.lsp
@@ -382,13 +378,11 @@ For example, if `dir:baseuri()` is empty, the configuration page is:
 http://<mcp-server-address>/lsp-claw-config.lsp
 ```
 
-The application root and `index.lsp` redirect to this canonical page. With a
-configured administrator, username/password login creates the browser session
-used by the settings and lab-management APIs. Without one, the original page
-behavior remains: settings are open when no MCP token exists, or protected by
-the MCP-token login when one exists. The MCP authorization callback never
-accepts either browser session and continues to compare only the
-`Authorization: Bearer` value.
+The application root and `index.lsp` redirect to this canonical page. Settings
+are open when no MCP token exists. When one exists, token login creates the
+browser session used by the settings and lab-management APIs. The MCP
+authorization callback never accepts that browser session and continues to
+compare only the `Authorization: Bearer` value.
 
 LSP-Claw enables `GitHubIo`'s public archive fallback with a writable cache IO.
 When no GitHub token is configured, example `stat`, directory iteration, and
@@ -413,8 +407,8 @@ field is intentionally not validated and clears the stored GitHub token.
 If no MCP auth token is set, the MCP endpoint is unauthenticated. If a token is
 set, MCP clients must provide the configured bearer token.
 
-See [Credential-Bootstrap.md](Credential-Bootstrap.md) for the operator-facing
-bootstrap and upgrade contract.
+See [Command-Line-Token.md](Command-Line-Token.md) for command-line token
+initialization details.
 
 ## Origin Handling
 

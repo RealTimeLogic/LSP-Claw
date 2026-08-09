@@ -5,7 +5,7 @@ the repository root before packaging a modified checkout:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/fastmcp/Test-FastMCP.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-CredentialBootstrap.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-CommandLineToken.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-TokenSetup.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-management/Test-LabManagement.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-archive/Test-LabArchive.ps1
@@ -16,9 +16,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-LSP-Claw.ps1
 The harnesses perform these tests in order:
 
 1. Isolate and test generic FastMCP.
-2. Verify direct command-line browser credentials, optional MCP-token
-   bootstrap, original-page fallback, encrypted persistence, one-time behavior,
-   upgrade, and auth separation.
+2. Verify command-line MCP-token initialization, GitHub-token preservation,
+   encrypted persistence, one-time behavior, settings login, and auth
+   separation.
 3. Verify the browser configuration page, GitHub-token validation, redirects,
    ZIP upload, and browser lab start/stop.
 4. Test lab-management behavior in an isolated temporary Mako home.
