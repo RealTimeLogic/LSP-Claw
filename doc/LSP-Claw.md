@@ -350,7 +350,7 @@ without editing behavior code.
 
 LSP-Claw has three independent credential concerns:
 
-- A TPM-backed browser administrator for the configuration surface.
+- An optional TPM-backed browser administrator for the configuration surface.
 - `GITHUB_TOKEN` or `GH_TOKEN` for outbound GitHub API access.
 - `MCP_AUTH_TOKEN` for inbound MCP bearer-token authentication.
 
@@ -382,11 +382,13 @@ For example, if `dir:baseuri()` is empty, the configuration page is:
 http://<mcp-server-address>/lsp-claw-config.lsp
 ```
 
-The application root and `index.lsp` redirect to this canonical page. When no
-administrator exists, the page exposes only bootstrap guidance. Once configured,
-username/password login creates the browser session used by the settings and lab
-management APIs. The MCP authorization callback never accepts that session and
-continues to compare only the `Authorization: Bearer` value.
+The application root and `index.lsp` redirect to this canonical page. With a
+configured administrator, username/password login creates the browser session
+used by the settings and lab-management APIs. Without one, the original page
+behavior remains: settings are open when no MCP token exists, or protected by
+the MCP-token login when one exists. The MCP authorization callback never
+accepts either browser session and continues to compare only the
+`Authorization: Bearer` value.
 
 LSP-Claw enables `GitHubIo`'s public archive fallback with a writable cache IO.
 When no GitHub token is configured, example `stat`, directory iteration, and

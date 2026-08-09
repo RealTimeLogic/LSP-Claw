@@ -69,6 +69,15 @@ function Login-Browser($Server,[string]$Username,[string]$Password) {
    return [pscustomobject]@{Session=$session;Response=$response}
 }
 
+function Login-LegacyToken($Server,[string]$Token) {
+   $session = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
+   $response = Invoke-WebRequest -UseBasicParsing -Uri ($Server.BaseUri + "lsp-claw-config.lsp") -Method Post -WebSession $session -Body @{
+      action="login"
+      loginToken=$Token
+   }
+   return [pscustomobject]@{Session=$session;Response=$response}
+}
+
 function New-InitializeBody {
    return @{
       jsonrpc="2.0"
@@ -200,8 +209,12 @@ try {
    $env:MCP_AUTH_TOKEN=$null
    $env:GITHUB_TOKEN=$null
    Assert-True $server.Started "Existing token-only installation did not start"
-   $setupRequired = Invoke-WebRequest -UseBasicParsing -Uri ($server.BaseUri + "lsp-claw-config.lsp")
-   Assert-True ($setupRequired.Content -match "Administrator setup required") "Token-only installation exposed browser settings"
+   $legacyLoginPage = Invoke-WebRequest -UseBasicParsing -Uri ($server.BaseUri + "lsp-claw-config.lsp")
+   Assert-True ($legacyLoginPage.Content -match "Authentication token") "Existing installation did not retain token-based settings login"
+   $legacyBrowser = Login-LegacyToken $server $legacyToken
+   Assert-True ($legacyBrowser.Response.Content -match "Token settings") "Existing MCP token could not unlock the original settings page"
+   Assert-True ($legacyBrowser.Response.Content -match [regex]::Escape($legacyGithub)) "Original settings page did not preserve the GitHub token"
+   Assert-True ((Get-McpInitializeStatus $server $null $legacyBrowser.Session) -in @(401,403)) "Legacy browser session authorized the MCP endpoint"
    Assert-McpHandshake $server $legacyToken
    Stop-TestServer $server
    $server = Start-TestServer $legacyRuntime @("-credentials","upgrade-admin:upgrade-password")
@@ -227,7 +240,7 @@ try {
    Assert-McpHandshake $server $firstToken
    Stop-TestServer $server
 
-   Write-Output "CREDENTIAL_BOOTSTRAP_TEST_PASS direct=true colonPassword=true bearer=true encrypted=true oneTime=true firstWins=true legacyUpgrade=true validation=true separated=true"
+   Write-Output "CREDENTIAL_BOOTSTRAP_TEST_PASS direct=true colonPassword=true bearer=true encrypted=true oneTime=true firstWins=true optionalFallback=true legacyUpgrade=true validation=true separated=true"
 }
 finally {
    $env:GITHUB_TOKEN=$oldGitHubToken

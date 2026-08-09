@@ -1,16 +1,16 @@
 # Command-Line Credential Bootstrap
 
-On its first Mako start, LSP-Claw accepts two direct options:
+On its first Mako start, LSP-Claw optionally accepts two direct options:
 
 ```text
 mako -l::lsp-claw.zip -credentials admin:your-password -token your-mcp-bearer-token
 ```
 
-`-credentials` is required and creates the browser configuration
-administrator. `-token` is optional and initializes the independent MCP Bearer
-token. Credentials split at the first colon, so the password may contain
-additional colons. The MCP token must contain 16 to 4096 bytes and no NUL, CR,
-or LF characters.
+When bootstrap is used, `-credentials` is required and creates the browser
+configuration administrator. `-token` optionally initializes the independent
+MCP Bearer token. Credentials split at the first colon, so the password may
+contain additional colons. The MCP token must contain 16 to 4096 bytes and no
+NUL, CR, or LF characters.
 
 The first occurrence of each option wins. Missing or empty values, values that
 begin with `-`, malformed credentials, and token-only bootstrap fail startup.
@@ -23,8 +23,13 @@ eligible; its existing GitHub and MCP tokens are preserved.
 
 Browser credentials are stored through the TPM-backed JSON-user mechanism in
 `LSP-Claw-Admin.bin`. GitHub and MCP tokens remain encrypted in
-`LSP-Claw-Keys.bin`. Browser sessions do not authorize MCP, and the Bearer token
-is not accepted as a browser password.
+`LSP-Claw-Keys.bin`. Browser sessions never authorize MCP, and when an
+administrator exists, the Bearer token is not accepted as its browser password.
+
+If bootstrap is not used, the original settings page remains enabled. It opens
+without a login when no MCP token is configured. When an MCP token exists, the
+original token login protects the page. This fallback does not create an
+administrator record.
 
 Direct command-line secrets may be visible in command history and process
 listings. File-based secret options are not part of this minimal bootstrap.

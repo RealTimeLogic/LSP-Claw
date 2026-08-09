@@ -16,8 +16,6 @@ $oldGitHubApi = $env:LSP_CLAW_GITHUB_API
 $oldGitHubToken = $env:GITHUB_TOKEN
 $oldGhToken = $env:GH_TOKEN
 $oldMcpToken = $env:MCP_AUTH_TOKEN
-$adminUsername = "token-ui-admin"
-$adminPassword = "token-ui-password"
 
 function Assert-True($Condition,[string]$Message) {
    if (-not $Condition) { throw $Message }
@@ -43,7 +41,7 @@ try {
    $env:GITHUB_TOKEN = $null
    $env:GH_TOKEN = $null
    $env:MCP_AUTH_TOKEN = $null
-   $process = Start-Process -FilePath $Mako -ArgumentList @("-llsp-claw::www","-credentials","${adminUsername}:${adminPassword}") -WorkingDirectory $stage -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+   $process = Start-Process -FilePath $Mako -ArgumentList "-llsp-claw::www" -WorkingDirectory $stage -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
    $deadline = (Get-Date).AddSeconds(20)
    do {
       Start-Sleep -Milliseconds 200
@@ -64,15 +62,8 @@ try {
    }
    finally { $rootResponse.Dispose() }
    $loginPage = Invoke-WebRequest -UseBasicParsing -Uri $configUri -SessionVariable BrowserSession
-   Assert-True ($loginPage.Content -match '<label for="username">Username</label>') "Configuration page did not request an administrator username"
-   Assert-True ($loginPage.Content -match '<label for="password">Password</label>') "Configuration page did not request an administrator password"
-   $login = Invoke-WebRequest -UseBasicParsing -Uri $configUri -Method Post -WebSession $BrowserSession -Body @{
-      action="login"
-      username=$adminUsername
-      password=$adminPassword
-   }
-   Assert-True ($login.Content -match "Token settings") "Browser administrator could not log in"
-   $adminHash = (Get-FileHash -Algorithm SHA256 (Join-Path $stage "LSP-Claw-Admin.bin")).Hash
+   Assert-True ($loginPage.Content -match "Token settings") "Optional bootstrap absence hid the original settings page"
+   Assert-True ($loginPage.Content -notmatch "Administrator setup required") "Settings page still required command-line credentials"
    $invalid = Invoke-WebRequest -UseBasicParsing -Uri $configUri -Method Post -Body @{
       action="save"
       githubToken="invalid-test-token"
@@ -165,11 +156,8 @@ try {
    }
    Assert-True ($stoppedAgain.ok -and -not $stoppedAgain.result.running -and -not $stoppedAgain.result.changed) "Browser lab stop was not idempotent"
 
-   $adminData = [IO.File]::ReadAllBytes((Join-Path $stage "LSP-Claw-Admin.bin"))
-   $adminText = [Text.Encoding]::UTF8.GetString($adminData)
-   Assert-True ($adminText -notmatch [regex]::Escape($adminPassword)) "Browser password was stored in plaintext"
-   Assert-True ((Get-FileHash -Algorithm SHA256 (Join-Path $stage "LSP-Claw-Admin.bin")).Hash -eq $adminHash) "Saving or clearing tokens changed the browser administrator"
-   Write-Output "TOKEN_SETUP_TEST_PASS adminLogin=true invalidRejected=true mcpValidation=true unchanged=true validAccepted=true activated=true clear=true labStartStop=true"
+   Assert-True (-not (Test-Path -LiteralPath (Join-Path $stage "LSP-Claw-Admin.bin"))) "Using the original settings page created an administrator"
+   Write-Output "TOKEN_SETUP_TEST_PASS optionalBootstrap=true invalidRejected=true mcpValidation=true validAccepted=true activated=true clear=true labStartStop=true"
 }
 finally {
    $env:LSP_CLAW_GITHUB_API = $oldGitHubApi

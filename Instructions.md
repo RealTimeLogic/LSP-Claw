@@ -160,8 +160,8 @@ mako -l::Xedge.zip -l::lsp-claw.zip # Include Xedge, MCP URL http://localhost/mc
 mako -l::Xedge.zip # Only Xedge, MCP URL http://localhost/lsp-claw/mcp.lsp
 ```
 
-On the first Mako start, add `-credentials` to create the browser configuration
-administrator. See
+On the first Mako start, you may add `-credentials` to create an optional
+browser configuration administrator. See
 [Command-Line Credential Bootstrap](#command-line-credential-bootstrap).
 
 In the last example, LSP-Claw is not loaded when Mako Server starts. Instead,
@@ -206,17 +206,17 @@ http://ip-address/lsp-claw/mcp.lsp
 
 ## Command-Line Credential Bootstrap
 
-LSP-Claw uses separate credentials for its two protected surfaces:
+Command-line bootstrap is optional. When used, LSP-Claw separates credentials
+for its two protected surfaces:
 
 - A browser administrator username and password protects the configuration and
   browser lab-management page.
 - An MCP bearer token protects `mcp.lsp` for AI agents.
 
-These credentials are not interchangeable. Creating a browser session does not
-authorize MCP requests, and the MCP token is not accepted as the browser
-password.
+Creating a browser session never authorizes MCP requests. When a command-line
+administrator exists, the MCP token is not accepted as its browser password.
 
-Create the first browser administrator when starting Mako:
+To create a browser administrator, supply `-credentials` when starting Mako:
 
 ```text
 mako -l::lsp-claw.zip -credentials admin:your-password
@@ -235,10 +235,14 @@ the administrator or MCP token. Browser credentials are TPM-encrypted in
 `LSP-Claw-Admin.bin`; GitHub and MCP tokens remain encrypted in
 `LSP-Claw-Keys.bin`.
 
-For an existing installation that already has GitHub or MCP token settings but
-no browser administrator, restart it once with `-credentials`. Existing tokens
-are preserved. Until an administrator is created, the browser page shows setup
-instructions instead of exposing token or lab settings.
+If `-credentials` is omitted, the original settings page remains available.
+It opens directly when no MCP token exists. If an MCP token is already
+configured, that token unlocks the settings page as it did before command-line
+bootstrap was added. This browser session still cannot authorize MCP requests.
+
+An existing installation with GitHub or MCP token settings can optionally add
+an administrator by restarting once with `-credentials`; its tokens are
+preserved.
 
 Direct command-line secrets may be visible in command history and process
 listings. This is an accepted limitation of the minimal bootstrap.

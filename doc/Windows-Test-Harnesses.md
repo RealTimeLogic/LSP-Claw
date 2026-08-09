@@ -17,8 +17,8 @@ The harnesses perform these tests in order:
 
 1. Isolate and test generic FastMCP.
 2. Verify direct command-line browser credentials, optional MCP-token
-   bootstrap, encrypted persistence, one-time behavior, upgrade, and auth
-   separation.
+   bootstrap, original-page fallback, encrypted persistence, one-time behavior,
+   upgrade, and auth separation.
 3. Verify the browser configuration page, GitHub-token validation, redirects,
    ZIP upload, and browser lab start/stop.
 4. Test lab-management behavior in an isolated temporary Mako home.
