@@ -157,6 +157,9 @@ When the user asks which GitHub example to use:
 Selection rules:
 
 - LSP-Claw does not rank examples. The AI agent chooses.
+- For a device-management application, control panel, dashboard, or multi-page
+  embedded interface, select Light-Dashboard/custom unless the user explicitly
+  requests another example or variant.
 - Prefer examples whose useWhen, topics, protocol, variants, and run commands
   match the user's requested workflow.
 - Use avoidWhen to reject superficially related examples that do not fit.

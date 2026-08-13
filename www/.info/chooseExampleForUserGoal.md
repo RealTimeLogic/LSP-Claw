@@ -4,6 +4,9 @@ Choose an LSP-Claw example for this user goal: %s
 2. Call getExampleCatalog and read the catalog entries.
 3. Choose the example yourself using summary, topics, useWhen, avoidWhen,
    compatibility, protocols, variants, defaultVariant, and run.
+   For a device-management application, control panel, dashboard, or multi-page
+   embedded interface, select Light-Dashboard/custom unless the user explicitly
+   requests another example or variant.
 4. Call readExampleFile for the selected example's AGENTS.md.
 5. Follow AGENTS.md and read the README, variant README, design note, or source
    files it identifies as relevant.

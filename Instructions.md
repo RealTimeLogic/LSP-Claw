@@ -21,6 +21,18 @@ start, stop, and replace the application being tested without restarting
 the device, RTOS, or hosting server. A monolithic RTOS device can keep
 running its core firmware while the MCP server restarts only the lab app.
 
+## Design a Device Interface
+
+For device-management applications, use
+[Light-Dashboard](https://github.com/RealTimeLogic/LSP-Examples/tree/master/Light-Dashboard/).
+
+```text
+Use LSP-Claw to build a device management interface using
+Light-Dashboard/custom. Check the runtime and lab, then ask what device, pages,
+live data, commands, and visual style I need. Build and test the interface and
+give me its URL.
+```
+
 ## Recommended Package for Mako Users
 
 If you use Mako Server, the recommended starting point is the
@@ -71,6 +83,9 @@ the destination. The destination fetches the ZIP directly from the source
 after the user confirms the exact source origin. The two persistent MCP tokens
 remain separate and are never forwarded between servers.
 
+This supports a hybrid workflow: develop and test the application with Mako,
+then transfer the complete lab to an Xedge server running on the target RTOS.
+
 The following diagram illustrates how a developer can use an AI agent
 running on a local computer to develop, test, and debug software
 directly on an embedded device over the local network. The AI agent
@@ -112,6 +127,8 @@ browser can be used to manually test the UI.
 
 ## Examples and Tutorials
 
+- The [Light Dashboard](https://github.com/RealTimeLogic/LSP-Examples/tree/master/Light-Dashboard)
+  `custom/` version is the recommended base for device-management interfaces.
 - A practical example is the LSP-Claw generated [ASUSWRT-style router interface](https://minnow.realtimelogic.com/asus/ai-prompt.html). The link opens the page that explains the prompt and shows how the router interface was created. The page itself is also part of the generated router UI.
 - The article [Vibe Coding Embedded Web Interfaces](https://realtimelogic.com/articles/Vibe-Coding-Embedded-Web-Interfaces) provides additional examples.
 - The [Blob Arena Multiplayer Game Article](https://makoserver.net/articles/Blob-Arena-Multiplayer-Game) shows how to design a game and explains Spec-Driven AI Development.
@@ -203,30 +220,6 @@ The MCP server endpoint will therefore be:
 http://ip-address/lsp-claw/mcp.lsp
 ```
 
-## Command-Line MCP Token
-
-The optional `-token` argument initializes the MCP bearer token on first start:
-
-```text
-mako -l::lsp-claw.zip -token your-mcp-bearer-token
-```
-
-The token must contain 16 to 4096 bytes and cannot contain NUL, CR, or LF. It
-sets only MCP authentication; the GitHub token remains unchanged. Once an MCP
-token exists, later `-token` arguments are ignored and cannot replace it.
-
-The settings page opens directly when no MCP token exists. When a token is
-configured, use that token to sign in. The resulting browser session does not
-authorize MCP requests; MCP clients must still send `Authorization: Bearer`.
-This settings authorization coexists with Xedge or FuguHub login in the same
-Mako server. Signing in or out of LSP-Claw does not replace their user session.
-
-Direct command-line secrets may be visible in command history and process
-listings. This is an accepted limitation of the minimal bootstrap.
-
-See [Command-Line MCP Token](doc/Command-Line-Token.md) for validation and
-storage details.
-
 ## Configure Tokens
 
 LSP-Claw can use two optional tokens:
@@ -242,61 +235,9 @@ LSP-Claw can use two optional tokens:
 The GitHub token is for outbound GitHub access only. It does not authenticate
 MCP clients. The MCP authentication token is what protects the MCP server.
 
-Both tokens are optional. Without a GitHub token, LSP-Claw serves public example
-IO from a GitHub repository ZIP downloaded through `codeload.github.com` and
-opened with BAS `ZipIo`; GitHub API-only operations remain subject to anonymous
-rate limits. If no MCP authentication token is configured, the MCP endpoint is
-reachable by any client that can connect to it.
+### Web Token Configuration (Preferred)
 
-If GitHub rejects a configured token during a public read, LSP-Claw records the
-rejection. When an anonymous retry is unavailable or rate limited, public
-example metadata, directory iteration, and file reads switch to the same ZIP
-snapshot. The snapshot is downloaded once per server process and stored in the
-ignored runtime file `LSP-Claw-GitHub-ReadCache.zip`. Replace an invalid token
-to regain authenticated API access. The public snapshot operates in read-only
-mode.
-
-The browser configuration page validates every non-empty GitHub token with
-GitHub before saving it. A rejected token is marked invalid and GitHub's error
-is displayed under the field; neither token setting is changed. A successful
-save activates the validated GitHub token immediately, without restarting
-LSP-Claw. Leaving the GitHub field blank skips validation and clears the stored
-GitHub token.
-
-### Mako Token Configuration
-
-When running LSP-Claw under Mako Server, tokens can be configured with
-environment variables before starting Mako, but it's easier to use the
-Web Token Configuration, explained below.
-
-```text
-GITHUB_TOKEN=your-github-token
-MCP_AUTH_TOKEN=your-mcp-auth-token
-```
-
-`GH_TOKEN` can also be used as a fallback name for the GitHub token.
-
-For Windows command prompt:
-
-```text
-set GITHUB_TOKEN=your-github-token
-set MCP_AUTH_TOKEN=your-mcp-auth-token
-mako -l::lsp-claw.zip
-```
-
-You can also configure the same values in
-[mako.conf](https://realtimelogic.com/ba/doc/en/Mako.html#cfgfile):
-
-```lua
-GITHUB_TOKEN="your-github-token"
-MCP_AUTH_TOKEN="your-mcp-auth-token"
-```
-
-### Web Token Configuration for Mako and Xedge
-
-LSP-Claw also includes a browser configuration page for configuring tokens.
-This is optional when using Mako Server, but **required when using standalone
-Xedge** if you want to set these tokens:
+The easiest way to configure either token is the LSP-Claw browser page:
 
 ```text
 http://localhost/lsp-claw-config.lsp
@@ -311,14 +252,21 @@ use:
 http://localhost/lsp-claw/lsp-claw-config.lsp
 ```
 
-Requests to the application root or `index.lsp` redirect to the canonical
-`lsp-claw-config.lsp` page. The configuration page lets you set either token,
-both tokens, or neither token. When an MCP token is configured, use it to sign
-in. Leave a token field blank to store no value for that token. The lab list
-also provides a per-lab **Start lab** or **Stop lab** button, so the app runtime
-can be controlled without an AI agent. LSP-Claw stores its authorization in an
-application-specific session field, so an existing Xedge or FuguHub login does
-not interfere with this page.
+Requests to the application root redirect to the `lsp-claw-config.lsp`
+page. The configuration page lets you set either token, both tokens,
+or neither token. It validates a GitHub token before saving and stores
+both tokens encrypted using key material derived from the host device.
+A valid GitHub token takes effect immediately without restarting
+LSP-Claw.
+
+When an MCP token is configured, use it to sign in to this page. The resulting
+browser session does not authorize MCP requests; AI agents must still send the
+same token as an HTTP bearer token. LSP-Claw keeps this browser authorization
+separate from any Xedge or FuguHub login on the same server.
+
+Both tokens are optional. Without a GitHub token, public examples remain
+available, but GitHub API requests may be rate limited. Without an MCP token,
+any client that can reach the MCP endpoint can use it.
 
 The same page provides these lab-management controls:
 
@@ -328,10 +276,46 @@ The same page provides these lab-management controls:
 - **Upload and import ZIP** for creating a named lab or completely replacing a
   stopped lab after explicit confirmation.
 
-Tokens saved through LSP-Claw are stored encrypted using key material derived
-from the host/device. This is the preferred method for Xedge standalone systems
-and is also useful for Mako deployments where you do not want long-lived tokens
-kept in plain text configuration files.
+### Protect a New Remote Installation
+
+If the configuration page will be exposed to an untrusted network on first
+start, initialize the MCP token before opening the page. The GitHub token can
+still be added later through the UI. Mako provides two initialization methods.
+
+#### Command-Line MCP Token
+
+The optional `-token` argument initializes the encrypted MCP bearer token:
+
+```text
+mako -l::lsp-claw.zip -token your-mcp-bearer-token
+```
+
+The token must contain 16 to 4096 bytes and cannot contain NUL, CR, or LF. Once
+an MCP token exists, later `-token` arguments are ignored and cannot replace it.
+
+See [Command-Line MCP Token](doc/Command-Line-Token.md) for validation and
+storage details.
+
+#### Environment MCP Token
+
+Alternatively, set `MCP_AUTH_TOKEN` before the first Mako start. For Linux:
+
+```text
+MCP_AUTH_TOKEN='your-mcp-bearer-token'
+mako -l::lsp-claw.zip
+```
+
+For Windows:
+
+```powershell
+set MCP_AUTH_TOKEN = 'your-mcp-bearer-token'
+mako -l::lsp-claw.zip
+```
+
+LSP-Claw imports and encrypts the environment token. Remove the environment
+variable after the successful first start unless it is intentionally managed by
+the service environment; a value left in the environment takes precedence
+again on later starts.
 
 ## Configure Your AI Agent
 
@@ -392,7 +376,8 @@ bearer_token_env_var = "LSP_CLAW_MCP_TOKEN"
 ```
 
 Then set `LSP_CLAW_MCP_TOKEN` to the same value as the LSP-Claw
-`MCP_AUTH_TOKEN` before starting Codex.
+`MCP_AUTH_TOKEN` before starting Codex. `LSP_CLAW_MCP_TOKEN` configures the
+Codex client only; it does not set or change the token stored by LSP-Claw.
 
 For a remote server, use the remote URL instead:
 
@@ -400,43 +385,53 @@ For a remote server, use the remote URL instead:
 url = "http://192.168.1.50/mcp.lsp"
 ```
 
-### Codex with Two LSP-Claw Servers
+### Develop on Mako, Transfer to Xedge/RTOS
 
-Configure each server as a separate MCP entity when Codex must transfer a lab
-between devices. The servers normally use different bearer tokens:
+A practical embedded workflow is to develop and test the application with Mako
+first, then move it to Xedge on the target RTOS. Install LSP-Claw on both
+systems and configure each one as a separate MCP server. The servers normally
+use different bearer tokens:
 
 ```toml
-[mcp_servers.lsp_claw_1]
+[mcp_servers.lsp_claw_mako]
 url = "http://192.168.1.50/lsp-claw/mcp.lsp"
 enabled = true
 startup_timeout_sec = 10
 tool_timeout_sec = 60
-bearer_token_env_var = "LSP_CLAW_1_TOKEN"
+bearer_token_env_var = "LSP_CLAW_MAKO_TOKEN"
 
-[mcp_servers.lsp_claw_2]
+[mcp_servers.lsp_claw_xedge]
 url = "http://192.168.1.51/lsp-claw/mcp.lsp"
 enabled = true
 startup_timeout_sec = 10
 tool_timeout_sec = 60
-bearer_token_env_var = "LSP_CLAW_2_TOKEN"
+bearer_token_env_var = "LSP_CLAW_XEDGE_TOKEN"
 ```
 
 Set each environment variable to the token configured on that server. Codex
 coordinates the transfer, but LSP-Claw never forwards either persistent token
 to the other server.
 
+The agent transfers the complete lab directly between the two servers. The ZIP
+does not pass through the model. The destination import creates a new lab or,
+after confirmation, replaces a stopped lab; it does not merge source files into
+an existing lab.
+
 Restart the AI agent after changing its config, or start a new session so it
 loads the new MCP server.
 
-To verify the connection, ask the AI agent:
+Ask the agent to inspect both servers before transferring anything:
 
 ```text
-Use the LSP-Claw MCP server. Check the runtime and lab status, then tell me
-what you found. Do not change any files yet.
+Use the Mako LSP-Claw server as the source and the Xedge LSP-Claw server as the
+destination. Show me the source lab and destination state, then ask for
+confirmation before transferring the complete lab to Xedge. Start and test the
+transferred lab on Xedge and report any platform compatibility problems.
 ```
 
-If the AI agent reports the runtime and lab status, the MCP server is
-available.
+The agent uses `prepareLabTransfer` on Mako and `importLabTransfer` on Xedge.
+The destination fetches the archive directly after you confirm the source and
+target.
 
 ## First Useful Prompt
 
@@ -644,9 +639,9 @@ The AI agent can look through the examples, recommend a starting point, and copy
 only the part that should run in the lab.
 
 ```text
-Use LSP-Claw to find a good starting example for a small browser UI that
-controls a device setting. Tell me which example you recommend and why. Do not
-copy anything until you have checked whether the lab already contains files.
+Use LSP-Claw to build a device management interface from
+Light-Dashboard/custom. Check the lab, ask what pages, data, commands, and
+visual style I need, and ask before replacing existing files.
 ```
 
 The suggested example may not always be the best fit. Use critical thinking and
@@ -795,14 +790,11 @@ the timer updates from this server-side client using the topic
 
 ## Real-Time Browser Updates
 
-For dashboards or live device status, ask the AI agent to compare the available
-options before it starts changing files.
-
 ```text
-I want a small real-time dashboard that shows a simulated sensor value updating
-once per second. Use LSP-Claw to inspect examples that use WebSockets or SMQ,
-then recommend whether to start from an example or build a simpler app from
-scratch. Explain your recommendation before copying anything.
+Use LSP-Claw to build a real-time device dashboard from
+Light-Dashboard/custom. Add a page that shows a simulated sensor value updating
+once per second and a device command control. Preserve the dashboard's HTMX and
+SMQ design, then start and test the lab.
 ```
 
 ## Debugging

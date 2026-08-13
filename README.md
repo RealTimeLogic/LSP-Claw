@@ -5,6 +5,11 @@ Edition. See the [detailed instructions](Instructions.md) for other setups, incl
 
 ![LSP-Claw](www/LSP-Claw-Icon.png "LSP-Claw")
 
+## Start Device Interfaces with Light Dashboard
+
+For device-management applications, use
+[Light-Dashboard](https://github.com/RealTimeLogic/LSP-Examples/tree/master/Light-Dashboard).
+
 ## What You Need
 
 - An AI agent with [MCP support](Instructions.md#what-mcp-means-here), such as Codex, installed on your computer.
@@ -43,20 +48,18 @@ available labs, and tell me what you found. Do not change anything yet. Work
 only through LSP-Claw; if its tools are unavailable, stop and tell me.
 ```
 
-Find an example to start from:
+Build a device management interface:
 
 ```text
-Use LSP-Claw to show me three beginner-friendly examples from LSP-Examples.
-Briefly explain each one and wait for me to choose before copying anything.
+Use LSP-Claw to build a device management interface using
+Light-Dashboard/custom. Check the runtime and lab, then ask what device, pages,
+live data, commands, and visual style I need. Build and test the interface and
+give me its URL.
 ```
 
-Or create and test a small application:
+## Detailed Documentation
 
-```text
-Use LSP-Claw to create a new lab named hello-lsp. Create a simple index.lsp
-page that displays "Hello from LSP-Claw" and the current server time. Start
-the lab, test the page, and give me its URL.
-```
-
-For additional prompts, see
-[First Useful Prompt](Instructions.md#first-useful-prompt).
+Continue with the
+[complete LSP-Claw installation and usage guide](Instructions.md) for AI-agent
+configuration, additional prompts, alternative installations, lab management,
+backups, transfers, and tutorials.
