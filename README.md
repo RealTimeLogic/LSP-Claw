@@ -38,6 +38,14 @@ For device-management applications, use
    [Configure Your AI Agent](Instructions.md#configure-your-ai-agent) if you
    need agent-specific configuration details.
 
+## Getting Started
+
+The Mako Server Developer Edition is the easiest way to get started because it
+includes LSP-Claw and the required Mako resources in one ready-to-run package.
+This avoids manually installing and configuring the application.
+
+[![Mako Server Developer Edition](https://makoserver.net/images/MakoZipDeveloperEdition.png)](https://makoserver.net/documentation/developer-package/)
+
 ## First Prompts
 
 Prime the agent before asking it to build anything:
