@@ -1,10 +1,11 @@
 local x = mako or xedge
 assert(x,"This app requires Mako or Xedge")
 x.createloader(io)
+local getenv=os and os.getenv or function() return nil end
 
 local rw=require"rwfile"
 local GITHUB_TOKEN,MCP_AUTH_TOKEN
-local GITHUB_API=os.getenv"LSP_CLAW_GITHUB_API" or "https://api.github.com"
+local GITHUB_API=getenv"LSP_CLAW_GITHUB_API" or "https://api.github.com"
 local settingsIo=ba.openio(mako and "home" or "disk")
 
 local function validateMcpToken(token)
@@ -59,8 +60,8 @@ function app.saveTokens(githubToken,authToken)
 end
 
 if mako then
-   GITHUB_TOKEN = os.getenv"GITHUB_TOKEN" or os.getenv"GH_TOKEN"
-   MCP_AUTH_TOKEN = os.getenv"MCP_AUTH_TOKEN"
+   GITHUB_TOKEN = getenv"GITHUB_TOKEN" or getenv"GH_TOKEN"
+   MCP_AUTH_TOKEN = getenv"MCP_AUTH_TOKEN"
    if not GITHUB_TOKEN then
       GITHUB_TOKEN=require"loadconf".GITHUB_TOKEN
    end
@@ -149,10 +150,10 @@ end
 
 local appmgr=require"appmgr"
 local archiveManager=require"lab_archive".create(appmgr,{
-   transferTtl=tonumber(os.getenv"LSP_CLAW_TRANSFER_TTL_SECONDS"),
-   transferReadTimeoutMs=tonumber(os.getenv"LSP_CLAW_TRANSFER_READ_TIMEOUT_MS"),
-   transferTotalTimeoutSeconds=tonumber(os.getenv"LSP_CLAW_TRANSFER_TOTAL_TIMEOUT_SECONDS"),
-   allowedTransferPorts=os.getenv"LSP_CLAW_TRANSFER_ALLOWED_PORTS"
+   transferTtl=tonumber(getenv"LSP_CLAW_TRANSFER_TTL_SECONDS"),
+   transferReadTimeoutMs=tonumber(getenv"LSP_CLAW_TRANSFER_READ_TIMEOUT_MS"),
+   transferTotalTimeoutSeconds=tonumber(getenv"LSP_CLAW_TRANSFER_TOTAL_TIMEOUT_SECONDS"),
+   allowedTransferPorts=getenv"LSP_CLAW_TRANSFER_ALLOWED_PORTS"
 })
 
 local mcp = require"fastmcp.engine".create {
