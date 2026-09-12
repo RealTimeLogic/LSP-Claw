@@ -12,10 +12,6 @@ $stdout = Join-Path $stage "stdout.log"
 $stderr = Join-Path $stage "stderr.log"
 $process = $null
 $mockProcess = $null
-$oldGitHubApi = $env:LSP_CLAW_GITHUB_API
-$oldGitHubToken = $env:GITHUB_TOKEN
-$oldGhToken = $env:GH_TOKEN
-$oldMcpToken = $env:MCP_AUTH_TOKEN
 
 function Assert-True($Condition,[string]$Message) {
    if (-not $Condition) { throw $Message }
@@ -24,7 +20,7 @@ function Assert-True($Condition,[string]$Message) {
 try {
    New-Item -ItemType Directory -Path $stage | Out-Null
    Copy-Item -LiteralPath (Join-Path $repo "www") -Destination (Join-Path $stage "www") -Recurse
-   [IO.File]::WriteAllText((Join-Path $stage "mako.conf"),"port=$MakoPort`r`nsslport=0`r`n",[Text.UTF8Encoding]::new($false))
+   [IO.File]::WriteAllText((Join-Path $stage "mako.conf"),"host='127.0.0.1'`nport=$MakoPort`nsslport=0`nhome='./'`nLSP_CLAW_GITHUB_API='http://127.0.0.1:$MockGitHubPort'`n",[Text.UTF8Encoding]::new($false))
 
    $mockStdout = Join-Path $stage "mock-stdout.log"
    $mockStderr = Join-Path $stage "mock-stderr.log"
@@ -37,11 +33,7 @@ try {
    } while (-not $mockListener -and (Get-Date) -lt $mockDeadline)
    Assert-True $mockListener "Mock GitHub server did not start"
 
-   $env:LSP_CLAW_GITHUB_API = "http://127.0.0.1:$MockGitHubPort"
-   $env:GITHUB_TOKEN = $null
-   $env:GH_TOKEN = $null
-   $env:MCP_AUTH_TOKEN = $null
-   $process = Start-Process -FilePath $Mako -ArgumentList "-llsp-claw::www" -WorkingDirectory $stage -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+   $process = Start-Process -FilePath $Mako -ArgumentList "-c mako.conf -llsp-claw::www" -WorkingDirectory $stage -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
    $deadline = (Get-Date).AddSeconds(20)
    do {
       Start-Sleep -Milliseconds 200
@@ -86,6 +78,22 @@ try {
    Assert-True ($valid.Content -match "GitHub token validated for token-ui-test") "Valid token did not show validation success"
    Assert-True ($valid.Content -match "GitHub token: set") "Valid token was not activated"
    Assert-True (Test-Path -LiteralPath (Join-Path $stage "LSP-Claw-Keys.bin")) "Valid token was not persisted"
+
+   # Advanced saves are independent of GitHub validation and token storage.
+   $tokenHash = (Get-FileHash -LiteralPath (Join-Path $stage "LSP-Claw-Keys.bin")).Hash
+   $advanced = Invoke-WebRequest -UseBasicParsing -Uri $configUri -Method Post -WebSession $BrowserSession -Body @{
+      action="saveTransfer";transferTtl="9";transferReadTimeoutMs="2500";transferTotalTimeoutSeconds="15"
+   }
+   Assert-True ($advanced.Content -match 'Reload LSP-Claw') "Advanced save did not explain reload"
+   $savedSettings = Get-Content -Raw -LiteralPath (Join-Path $stage "LSP-Claw-Settings.json") | ConvertFrom-Json
+   Assert-True ($savedSettings.transferTtl -eq 9 -and $savedSettings.transferReadTimeoutMs -eq 2500) "Advanced settings were not persisted"
+   Assert-True ((Get-FileHash -LiteralPath (Join-Path $stage "LSP-Claw-Keys.bin")).Hash -eq $tokenHash) "Advanced save rewrote credentials"
+   $invalidAdvanced = Invoke-WebRequest -UseBasicParsing -Uri $configUri -Method Post -WebSession $BrowserSession -Body @{action="saveTransfer";transferTtl="-1"}
+   Assert-True ($invalidAdvanced.Content -match 'Transfer settings were not saved') "Invalid duration was accepted"
+   $getSave = Invoke-WebRequest -UseBasicParsing -Uri ($configUri+'?action=saveTransfer&transferTtl=55') -WebSession $BrowserSession
+   Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $stage "LSP-Claw-Settings.json") | ConvertFrom-Json).transferTtl -eq 9) "GET changed configuration"
+   $reset = Invoke-WebRequest -UseBasicParsing -Uri $configUri -Method Post -WebSession $BrowserSession -Body @{action="resetTransfer"}
+   Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $stage "LSP-Claw-Settings.json")).Trim() -eq '{}') "Reset did not remove saved overrides"
 
    $shortMcp = Invoke-WebRequest -UseBasicParsing -Uri $configUri -Method Post -Body @{
       action="save"
@@ -156,13 +164,9 @@ try {
    }
    Assert-True ($stoppedAgain.ok -and -not $stoppedAgain.result.running -and -not $stoppedAgain.result.changed) "Browser lab stop was not idempotent"
 
-   Write-Output "TOKEN_SETUP_TEST_PASS openWithoutToken=true invalidRejected=true mcpValidation=true validAccepted=true activated=true clear=true labStartStop=true"
+   Write-Output "TOKEN_SETUP_TEST_PASS openWithoutToken=true invalidRejected=true mcpValidation=true validAccepted=true activated=true clear=true advanced=true postOnly=true labStartStop=true"
 }
 finally {
-   $env:LSP_CLAW_GITHUB_API = $oldGitHubApi
-   $env:GITHUB_TOKEN = $oldGitHubToken
-   $env:GH_TOKEN = $oldGhToken
-   $env:MCP_AUTH_TOKEN = $oldMcpToken
    if ($process -and -not $process.HasExited) {
       Stop-Process -Id $process.Id -Force
       $process.WaitForExit()

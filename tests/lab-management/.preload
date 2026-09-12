@@ -185,12 +185,23 @@ function ghio:stat(path)
 end
 
 local mcp=FastMCP.create{name="Lab management Phase 1"}
-require"lspclaw".register(mcp,ghio,{},appmgr,{
+require"lspclaw".register(mcp,ghio,appmgr,{
    io=io,
    configurationStatus=function()
       return {githubTokenSet=true,mcpAuthTokenSet=true,setupBaseUri=""}
    end
 })
+
+-- Text reads are bounded before building MCP output, including empty files.
+assert(rw.file(namedIo,"oversized.txt",string.rep("x",1024*1024+1)))
+local oversized=mcp:callTool("readLabFile",{labName="router-demo",path="oversized.txt"})
+equal(errorCode(oversized),"readLabFileFailed","oversized text rejected")
+assert(namedIo:remove("oversized.txt"))
+local empty=mcp:callTool("readLabFile",{labName="router-demo",path="empty.bin"})
+check(empty.ok and empty.data.content == "","empty text remains readable")
+local iter=appmgr.recDirIter({files=function() error("injected directory failure") end},"",true)
+local iterOk,iterErr=pcall(iter)
+check(not iterOk and tostring(iterErr):find("injected directory failure",1,true),"directory iterator error propagated")
 
 local missing=mcp:callTool("backupLab",{labName="lsplab"})
 equal(errorCode(missing),"backupNameRequired","backupLab requires a user-provided name")

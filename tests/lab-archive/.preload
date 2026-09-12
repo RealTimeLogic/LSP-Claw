@@ -81,5 +81,36 @@ check(archive._parseTransferUrl("http://[::1]:8080/transfer.lsp"),"valid IPv6 ho
 check(archive._secureEqual("same-ticket","same-ticket"),"constant-work ticket comparison accepts equality")
 check(not archive._secureEqual("same-ticket","other-ticket"),"constant-work ticket comparison rejects inequality")
 
+-- Failed source reads and output callbacks must close the input handle.
+local sourceClosed=false
+local failingIo={open=function()
+   return {read=function() return nil,"injected read failure" end,
+           close=function() sourceClosed=true return true end}
+end}
+data,err=zip.encode({{path="read-error",source={io=failingIo,path="file"}}})
+check(not data and err:find("injected read failure",1,true) and sourceClosed,"ZIP source failure propagated and closed")
+local outputCalls=0
+local info,outputErr=zip.write({{path="out-error",content="data"}},function()
+   outputCalls=outputCalls+1
+   return nil,"injected write failure"
+end)
+check(not info and outputErr:find("injected write failure",1,true) and outputCalls == 1,"nil/error output stops ZIP writing")
+sourceClosed=false
+local largeIo={open=function()
+   local done=false
+   return {read=function() if not done then done=true return "too large" end end,
+           close=function() sourceClosed=true return true end}
+end}
+data,err=zip.encode({{path="limit",source={io=largeIo,path="file"}}},{maxEntryBytes=1})
+check(not data and sourceClosed,"ZIP input closes on output/limit exception")
+local manager=archive.create({},{baseIo=base,maxManifestBytes=16})
+local readSize
+local oversized={open=function()
+   return {read=function(_,size) readSize=size return string.rep(" ",size) end,
+           close=function() return true end}
+end}
+local staged,stageErr=manager:_validateAndStage(oversized,17)
+check(not staged and readSize == 17 and stageErr:find("size limit",1,true),"manifest read bounded before allocation")
+
 trace("LAB_ARCHIVE_TEST_PASS","checks="..passed)
 if mako and mako.exit then mako.exit(0) end

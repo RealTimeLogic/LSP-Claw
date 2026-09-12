@@ -91,10 +91,6 @@ end
 local Archive={}
 Archive.__index=Archive
 
-function Archive:_limits()
-   return self.limits
-end
-
 function Archive:_cleanup()
    local now=os.time()
    for id,ticket in pairs(self.tickets) do
@@ -280,11 +276,14 @@ end
 
 function Archive:_validateAndStage(zipIo,uploadSize)
    local limits=self.limits
-   local manifestText,manifestErr=rw.file(zipIo,manifestName)
-   if not manifestText then return nil,"archive manifest is missing: "..tostring(manifestErr or manifestName) end
+   local file,manifestErr=zipIo:open(manifestName,"rb")
+   if not file then return nil,"archive manifest is missing: "..tostring(manifestErr or manifestName) end
+   local manifestText,readErr=file:read(limits.maxManifestBytes+1)
+   local closed,closeErr=file:close()
+   if not manifestText or readErr or not closed then return nil,"cannot read archive manifest: "..tostring(readErr or closeErr) end
    if #manifestText > limits.maxManifestBytes then return nil,"archive manifest exceeds size limit" end
-   local decodeOk,manifest=pcall(ba.json.decode,manifestText)
-   if not decodeOk or type(manifest) ~= "table" then return nil,"archive manifest is invalid JSON" end
+   local decodeOk,manifest,extra=pcall(ba.json.decode,manifestText)
+   if not decodeOk or type(manifest) ~= "table" or extra ~= nil then return nil,"archive manifest is invalid JSON" end
    if manifest.format ~= formatName or manifest.version ~= formatVersion then return nil,"unsupported lab archive format or version" end
    if type(manifest.fileCount) ~= "number" or type(manifest.uncompressedBytes) ~= "number" then return nil,"archive manifest counts are invalid" end
    if type(manifest.emptyDirectories) ~= "table" then return nil,"archive manifest emptyDirectories is required" end
@@ -639,9 +638,6 @@ function Archive:importTransfer(args)
    args=args or {}
    local parsed,err=parseTransferUrl(args.transferUrl)
    if not parsed then return nil,err,"invalidTransferUrl" end
-   if self.allowedTransferPorts and not self.allowedTransferPorts[parsed.port] then
-      return nil,"source port is not allowed by this destination","invalidTransferUrl",parsed.origin
-   end
    if args.confirmed ~= true or args.confirmedSourceOrigin ~= parsed.origin then
       return nil,"explicit confirmation of the exact source origin is required","transferSourceRequiresConfirmation",parsed.origin
    end
@@ -731,20 +727,6 @@ function M.create(appmgr,options)
       maxCompressionRatio=tonumber(options.maxCompressionRatio) or 100,
       maxManifestBytes=tonumber(options.maxManifestBytes) or 256*1024
    }
-   local allowedTransferPorts=options.allowedTransferPorts
-   if type(allowedTransferPorts) == "string" then
-      local configured={}
-      if allowedTransferPorts ~= "" then
-         for value in allowedTransferPorts:gmatch("[^,%s]+") do
-            local port=tonumber(value)
-            assert(port and port%1 == 0 and port >= 1 and port <= 65535,"invalid LSP_CLAW_TRANSFER_ALLOWED_PORTS value: "..value)
-            configured[port]=true
-         end
-         allowedTransferPorts=configured
-      else
-         allowedTransferPorts=nil
-      end
-   end
    local archive=setmetatable({
       appmgr=assert(appmgr,"appmgr is required"),
       baseIo=options.baseIo or ba.openio("home") or ba.openio("disk"),
@@ -752,7 +734,6 @@ function M.create(appmgr,options)
       transferTtl=tonumber(options.transferTtl) or 60,
       transferReadTimeoutMs=tonumber(options.transferReadTimeoutMs) or 5000,
       transferTotalTimeoutSeconds=tonumber(options.transferTotalTimeoutSeconds) or 30,
-      allowedTransferPorts=allowedTransferPorts,
       limits=limits,
       tickets={}
    },Archive)

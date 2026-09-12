@@ -250,7 +250,8 @@ set and is not advertised as a capability.
 
 ### Proxy-derived URLs
 
-Direct requests derive advisory `serverOrigin` from a validated `Host` header.
+Direct requests derive advisory `serverOrigin` from a validated `Host` header
+and the actual connection scheme reported by `request:issecure()`.
 Forwarded headers are ignored by default. Set `trustForwardedHeaders=true` only
 when the application is behind a trusted proxy that sanitizes `Forwarded`,
 `X-Forwarded-Host`, and `X-Forwarded-Proto`. The derived URL is navigation
@@ -283,6 +284,11 @@ it returns the encoded string on success, or `nil, error` when the value cannot
 be represented as JSON. It does not throw for a serialization failure. The
 dispatcher translates such failures into JSON-RPC error `-32603`, and the HTTP
 adapters return a bounded HTTP 500 error response.
+
+BAS JSON encoding does not preserve marked empty arrays and converts some
+unsupported Lua values to null. FastMCP therefore retains its encoder to
+preserve this contract. Incoming MCP bodies are decoded directly with
+`ba.json.decode`.
 
 ## Tests
 

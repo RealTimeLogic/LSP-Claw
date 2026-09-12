@@ -1,11 +1,11 @@
 local x = mako or xedge
 assert(x,"This app requires Mako or Xedge")
 x.createloader(io)
-local getenv=os and os.getenv or function() return nil end
+local conf=mako and require"loadconf" or {}
 
 local rw=require"rwfile"
-local GITHUB_TOKEN,MCP_AUTH_TOKEN
-local GITHUB_API=getenv"LSP_CLAW_GITHUB_API" or "https://api.github.com"
+local GITHUB_TOKEN,MCP_AUTH_TOKEN,info,settingsMarker
+local GITHUB_API=conf.LSP_CLAW_GITHUB_API
 local settingsIo=ba.openio(mako and "home" or "disk")
 
 local function validateMcpToken(token)
@@ -18,61 +18,101 @@ end
 
 app.validateMcpToken=validateMcpToken
 
+local function missingFile(err)
+   return err == "notfound" or err == "enoent"
+end
+
+-- Settings belong to writable host storage, never the application ZIP.
+local function readSettings(name)
+   local fp,err=settingsIo:open(name,"rb")
+   if not fp and missingFile(err) then
+      -- Recover the old record if power was lost between the two renames.
+      local restored,restoreErr=settingsIo:rename(name..".bak",name)
+      if not restored and missingFile(restoreErr) then return nil end
+      assert(restored,"Cannot recover "..name..": "..tostring(restoreErr))
+      fp,err=settingsIo:open(name,"rb")
+   end
+   assert(fp,"Cannot read "..name..": "..tostring(err))
+   local data,readErr=fp:read(65537)
+   local ok,closeErr=fp:close()
+   assert(data and not readErr and ok and #data <= 65536,
+          "Cannot read "..name..": "..tostring(readErr or closeErr or "invalid size"))
+   return data
+end
+
+local function writeSettings(name,data)
+   if #data > 65536 then return nil,"settings exceed 64 KiB limit" end
+   -- A previous failed rollback must be recovered before replacing its backup.
+   local recovered,recoverErr=settingsIo:rename(name..".bak",name)
+   if not recovered and not missingFile(recoverErr) and recoverErr ~= "exist" then return nil,recoverErr end
+   local tmp=name..".tmp"
+   local fp,err=settingsIo:open(tmp,"wb")
+   if not fp then return nil,err end
+   local ok
+   ok,err=fp:write(data)
+   local closed,closeErr=fp:close()
+   if ok and closed then
+      local backup=name..".bak"
+      local removed,removeErr=settingsIo:remove(backup)
+      if not removed and not missingFile(removeErr) then settingsIo:remove(tmp) return nil,removeErr end
+      local moved,moveErr=settingsIo:rename(name,backup)
+      if not moved and not missingFile(moveErr) then settingsIo:remove(tmp) return nil,moveErr end
+      ok,err=settingsIo:rename(tmp,name)
+      if ok then settingsIo:remove(backup)
+      elseif moved then settingsIo:rename(backup,name) end
+   else ok,err=nil,err or closeErr end
+   if not ok then settingsIo:remove(tmp) end
+   return ok,err
+end
+
+local function decodeSettings(data)
+   local value,extra=ba.json.decode(data)
+   assert(type(value) == "table" and extra == nil,"Invalid LSP-Claw settings record")
+   return value
+end
+
+local tokenKey=ba.crypto.hash"sha256"(ba.tpm.uniquekey("LSP-Claw-Keys",32))(true)
 local function storeTokens(githubToken,authToken)
+   if githubToken ~= nil and type(githubToken) ~= "string" then return nil,"GitHub token must be a string" end
    if authToken == "" then authToken=nil end
    if authToken then
-      local valid,validationErr=validateMcpToken(authToken)
-      if not valid then return nil,validationErr end
-      authToken=valid
+      local valid,err=validateMcpToken(authToken)
+      if not valid then return nil,err end
    end
-   local key=ba.crypto.hash"sha256"(ba.tpm.uniquekey("LSP-Claw-Keys",32))(true)
-   local iv = "0123456789AB"
-   local gcm=ba.crypto.symmetric("GCM",key,iv)
-   local cipher,tag = gcm:encrypt(ba.json.encode{githubToken=githubToken,authToken=authToken})
-   local ok,err=rw.file(settingsIo,"LSP-Claw-Keys.bin",tag..cipher)
+   local iv=ba.rndbs(12)
+   local cipher,tag=ba.crypto.symmetric("GCM",tokenKey,iv):encrypt(
+      assert(ba.json.encode{githubToken=githubToken,authToken=authToken}))
+   local ok,err=writeSettings("LSP-Claw-Keys.bin","LCK2"..iv..tag..cipher)
    if not ok then return nil,err or "cannot save token settings" end
    GITHUB_TOKEN,MCP_AUTH_TOKEN=githubToken,authToken
-   if app.tokensChanged then app.tokensChanged(githubToken,authToken) end
+   settingsMarker=authToken and ba.crypto.hash"sha256"(authToken)(true)
+   if info then info.setToken(githubToken) end
    return true
 end
 
-function app.getSetTokens(githubToken,authToken)
-   if githubToken or authToken then
-      local ok,err=storeTokens(githubToken,authToken)
-      if not ok then return nil,nil,err end
-   elseif GITHUB_TOKEN == nil and MCP_AUTH_TOKEN == nil then
-      local data=rw.file(settingsIo,"LSP-Claw-Keys.bin")
-      if data then
-         local key=ba.crypto.hash"sha256"(ba.tpm.uniquekey("LSP-Claw-Keys",32))(true)
-         local gcm=ba.crypto.symmetric("GCM",key,"0123456789AB")
-         local tag,cipher=data:sub(1,16),data:sub(17)
-         if tag and cipher then
-            local t=ba.json.decode(gcm:decrypt(cipher,tag) or "")
-            if t then GITHUB_TOKEN,MCP_AUTH_TOKEN=t.githubToken,t.authToken end
-         end
-      end
-   end
+function app.getTokens()
    return GITHUB_TOKEN,MCP_AUTH_TOKEN
 end
+app.saveTokens=storeTokens
 
-function app.saveTokens(githubToken,authToken)
-   return storeTokens(githubToken,authToken)
+local tokenData=readSettings("LSP-Claw-Keys.bin")
+if tokenData then
+   local modern=tokenData:sub(1,4) == "LCK2"
+   local iv=modern and tokenData:sub(5,16) or "0123456789AB"
+   local offset=modern and 17 or 1
+   local plain=ba.crypto.symmetric("GCM",tokenKey,iv):decrypt(
+      tokenData:sub(offset+16),tokenData:sub(offset,offset+15))
+   assert(plain,"Cannot decrypt LSP-Claw token settings")
+   local tokens=decodeSettings(plain)
+   GITHUB_TOKEN,MCP_AUTH_TOKEN=tokens.githubToken,tokens.authToken
+   assert(GITHUB_TOKEN == nil or type(GITHUB_TOKEN) == "string","Invalid stored GitHub token")
+   if MCP_AUTH_TOKEN then assert(validateMcpToken(MCP_AUTH_TOKEN)) end
+   -- Preserve existing records; the next save migrates the legacy encryption.
+   settingsMarker=MCP_AUTH_TOKEN and ba.crypto.hash"sha256"(MCP_AUTH_TOKEN)(true)
+else
+   GITHUB_TOKEN,MCP_AUTH_TOKEN=conf.GITHUB_TOKEN,conf.MCP_AUTH_TOKEN
+   if GITHUB_TOKEN or MCP_AUTH_TOKEN then assert(storeTokens(GITHUB_TOKEN,MCP_AUTH_TOKEN)) end
 end
-
-if mako then
-   GITHUB_TOKEN = getenv"GITHUB_TOKEN" or getenv"GH_TOKEN"
-   MCP_AUTH_TOKEN = getenv"MCP_AUTH_TOKEN"
-   if not GITHUB_TOKEN then
-      GITHUB_TOKEN=require"loadconf".GITHUB_TOKEN
-   end
-   if not MCP_AUTH_TOKEN then
-      MCP_AUTH_TOKEN=require"loadconf".MCP_AUTH_TOKEN
-   end
-end
-
-local tokenSettingsErr
-GITHUB_TOKEN,MCP_AUTH_TOKEN,tokenSettingsErr=app.getSetTokens(GITHUB_TOKEN,MCP_AUTH_TOKEN)
-if tokenSettingsErr then error("LSP-Claw token settings failed: "..tostring(tokenSettingsErr)) end
 
 local function initializeCommandLineToken()
    for ix,arg in ipairs(mako and mako.argv or {}) do
@@ -103,16 +143,12 @@ if not tokenOptionOk then
 end
 
 local SETTINGS_SESSION_KEY="lspClawSettingsToken"
-local function settingsSessionMarker()
-   return MCP_AUTH_TOKEN and ba.crypto.hash"sha256"(MCP_AUTH_TOKEN)(true)
-end
-
 function app.settingsSession(cmd,authenticate)
    local session=authenticate == true and cmd:session(true) or cmd:session()
    if session and authenticate ~= nil then
-      session[SETTINGS_SESSION_KEY]=authenticate and settingsSessionMarker() or nil
+      session[SETTINGS_SESSION_KEY]=authenticate and settingsMarker or nil
    end
-   local marker=settingsSessionMarker()
+   local marker=settingsMarker
    return marker ~= nil and session and session[SETTINGS_SESSION_KEY] == marker or false
 end
 
@@ -127,7 +163,8 @@ else
    tracep(0, "WARNING: MCP bearer token authentication is disabled")
 end
 
-local ghio,info = require"GitHubIo".create{
+local ghio
+ghio,info = require"GitHubIo".create{
    owner  = "RealTimeLogic",
    repo	  = "LSP-Examples",
    branch = "master",
@@ -144,17 +181,42 @@ function app.validateGitHubToken(token)
    return info.validateToken(token)
 end
 
-app.tokensChanged=function(githubToken)
-   info.setToken(githubToken)
+local transferFields={
+   {"transferTtl","LSP_CLAW_TRANSFER_TTL_SECONDS","Ticket lifetime (seconds)"},
+   {"transferReadTimeoutMs","LSP_CLAW_TRANSFER_READ_TIMEOUT_MS","Transfer I/O timeout (milliseconds)"},
+   {"transferTotalTimeoutSeconds","LSP_CLAW_TRANSFER_TOTAL_TIMEOUT_SECONDS","Download time limit (seconds)"}
+}
+local function transferOptions(values)
+   local options={}
+   for _,field in ipairs(transferFields) do
+      local value=values[field[1]]
+      if value == nil then value=conf[field[2]] end
+      if value ~= nil then
+         value=tonumber(value)
+         if not value or value <= 0 or value%1 ~= 0 or value > 2147483647 then
+            return nil,field[3].." must be a positive integer up to 2147483647"
+         end
+         options[field[1]]=value
+      end
+   end
+   return options
 end
-
+local transferData=readSettings("LSP-Claw-Settings.json")
+local transferSettings=transferData and decodeSettings(transferData) or {}
 local appmgr=require"appmgr"
-local archiveManager=require"lab_archive".create(appmgr,{
-   transferTtl=tonumber(getenv"LSP_CLAW_TRANSFER_TTL_SECONDS"),
-   transferReadTimeoutMs=tonumber(getenv"LSP_CLAW_TRANSFER_READ_TIMEOUT_MS"),
-   transferTotalTimeoutSeconds=tonumber(getenv"LSP_CLAW_TRANSFER_TOTAL_TIMEOUT_SECONDS"),
-   allowedTransferPorts=getenv"LSP_CLAW_TRANSFER_ALLOWED_PORTS"
-})
+local archiveManager=require"lab_archive".create(appmgr,assert(transferOptions(transferSettings)))
+app.transferFields=transferFields
+function app.getTransferSettings()
+   return transferSettings,archiveManager
+end
+function app.saveTransferSettings(values)
+   local options,err=transferOptions(values)
+   if not options then return nil,err end
+   local ok
+   ok,err=writeSettings("LSP-Claw-Settings.json",assert(ba.json.encode(values)))
+   if ok then transferSettings=values end
+   return ok,err
+end
 
 local mcp = require"fastmcp.engine".create {
    name = "BAS Example Workspace Assistant",
@@ -240,8 +302,7 @@ local function getConfigurationStatus()
    }
 end
 
--- Codex, add code here
-require"lspclaw".register(mcp, ghio, info, appmgr, {
+require"lspclaw".register(mcp, ghio, appmgr, {
    instructions = mcp.instructions,
    io = io,
    runtimeTrace = runtimeTrace,
@@ -346,33 +407,15 @@ function app.transferService(cmd,response)
 end
 
 function app.setRuntimeTraceBufferSize(size)
-   if runtimeTrace.setBufferSize then
-      runtimeTraceBufferSize = runtimeTrace.setBufferSize(size)
-   else
-      runtimeTraceBufferSize = math.floor(tonumber(size) or 0)
-      if runtimeTraceBufferSize < 0 then runtimeTraceBufferSize = 0 end
-   end
+   runtimeTraceBufferSize = runtimeTrace.setBufferSize(size)
    updateTraceHook()
    return runtimeTraceBufferSize
 end
 
 local Http = require"fastmcp.http"
 transport = Http.streamable(mcp, {
-   stateful = true,
-   enableGetStream = true,
-   protocolVersion = "2025-11-25",
    requireStrictAccept = false,
    allowNonSseGet = true,
-   -- LSP-Claw is commonly installed behind the Xedge application router.
-   -- FastMCP itself ignores forwarded headers unless this is explicitly set.
-   trustForwardedHeaders = true,
-   maxRequestBodyBytes = 1024 * 1024,
-   maxResponseBytes = 4 * 1024 * 1024,
-   maxNotificationBytes = 256 * 1024,
-   maxSessions = 16,
-   maxStreamsPerSession = 2,
-   sessionIdleTimeoutSeconds = 30 * 60,
-   sessionMaxLifetimeSeconds = 8 * 60 * 60,
    authorizeOrigin = authorizeRequest,
    onStreamOpen = function(session, stream, self)
       attachTraceStream()
@@ -388,5 +431,11 @@ function app.cmdService(cmd)
 end
 
 function onunload()
+   if transport then
+      for id in pairs(transport.sessions) do transport:closeSession(id) end
+   end
+   for _,ticket in pairs(archiveManager.tickets) do
+      if ticket.path then archiveManager.baseIo:remove(ticket.path) end
+   end
    traceDir:ontrace()
 end

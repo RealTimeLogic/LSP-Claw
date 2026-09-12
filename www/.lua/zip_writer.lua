@@ -134,12 +134,16 @@ local function emitEntry(entry,output)
    if type(entry.source) == "table" then
       local source,err=entry.source.io:open(entry.source.path,"rb")
       assert(source,"cannot open ZIP source "..tostring(entry.source.path)..": "..tostring(err))
-      while true do
-         local chunk=source:read(16384)
-         if not chunk or #chunk == 0 then break end
-         output(chunk)
-      end
+      local readOk,readErr=pcall(function()
+         while true do
+            local chunk,err=source:read(16384)
+            assert(not err,"cannot read ZIP source: "..tostring(err))
+            if not chunk or #chunk == 0 then break end
+            output(chunk)
+         end
+      end)
       local ok,closeErr=source:close()
+      assert(readOk,readErr)
       assert(ok,"cannot close ZIP source: "..tostring(closeErr))
       return
    end
@@ -168,7 +172,7 @@ local function writeInternal(files,output,options)
       total=total+#data
       assert(total <= maxArchiveBytes,"ZIP archive exceeds size limit of "..maxArchiveBytes.." bytes")
       local ok,err=output(data)
-      assert(ok ~= false,"ZIP output failed: "..tostring(err))
+      assert(ok ~= false and not (ok == nil and err),"ZIP output failed: "..tostring(err))
    end
 
    local entries=sortedEntries(files,options)

@@ -117,16 +117,18 @@ server's MCP bearer token.
 
 The destination accepts only strict HTTP/HTTPS URLs without user-info, queries,
 fragments, malformed hosts, or invalid ports. It does not follow redirects.
-`LSP_CLAW_TRANSFER_ALLOWED_PORTS` may contain a comma-separated destination
-allowlist such as `80,443,8443`; when unset, any valid explicitly confirmed port
-is allowed. HTTPS requests require a trusted server certificate.
+Any valid explicitly confirmed port is allowed. HTTPS requests require a
+trusted server certificate.
 
-The HTTP client uses a 5-second connect/read/write timeout and a 30-second total
-transfer limit by default. These can be changed with
-`LSP_CLAW_TRANSFER_READ_TIMEOUT_MS` and
-`LSP_CLAW_TRANSFER_TOTAL_TIMEOUT_SECONDS`. The source lifetime can be changed
-with `LSP_CLAW_TRANSFER_TTL_SECONDS`. Archive byte and expansion limits remain
-the same as local import.
+The HTTP client uses a 5-second I/O timeout and a 30-second download-loop time
+limit by default. The latter excludes connection/header processing. Change
+these and the source's 60-second ticket lifetime through **Advanced transfer
+settings** on the configuration page, or through the optional Mako configuration
+keys `LSP_CLAW_TRANSFER_READ_TIMEOUT_MS`,
+`LSP_CLAW_TRANSFER_TOTAL_TIMEOUT_SECONDS`, and `LSP_CLAW_TRANSFER_TTL_SECONDS`.
+See [configuration precedence, ranges, and reload behavior](../Instructions.md#advanced-transfer-settings).
+Server environment variables are not read. Archive byte and expansion limits
+remain the same as local import.
 
 The source consumes a matching ticket on the first GET attempt. The destination
 requires the response length and digest headers to match the descriptor, hashes

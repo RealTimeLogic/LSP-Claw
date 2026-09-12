@@ -1,0 +1,169 @@
+local base=ba.openio"home"
+local rw=require"rwfile"
+local source=assert(rw.file(io,"app-preload.lua"))
+source=source:sub(1,assert(source:find("local mcp =",1,true))-1)
+local passed=0
+local function check(ok,message)
+   assert(ok,message)
+   passed=passed+1
+end
+local keyFile="LSP-Claw-Keys.bin"
+local settingsFile="LSP-Claw-Settings.json"
+local function clear()
+   for _,name in ipairs({keyFile,settingsFile}) do
+      for _,suffix in ipairs({"",".tmp",".bak"}) do base:remove(name..suffix) end
+   end
+end
+local failWrite,failRename,failClose,failRestore
+local storage={}
+local missingError="notfound"
+local function platformResult(value,err)
+   return value,err == "notfound" and missingError or err
+end
+function storage:open(name,mode)
+   if mode == "wb" and failWrite then return nil,"no space" end
+   local fp,err=base:open(name,mode)
+   if fp and mode == "wb" and failClose then
+      return {write=function(_,data) return fp:write(data) end,
+              close=function() fp:close() return nil,"close failure" end}
+   end
+   return platformResult(fp,err)
+end
+function storage:remove(name) return platformResult(base:remove(name)) end
+function storage:rename(old,new)
+   if failRestore and old:sub(-4) == ".bak" then return nil,"restore failure" end
+   if failRename and old:sub(-4) == ".tmp" then return nil,"rename failure" end
+   return platformResult(base:rename(old,new))
+end
+local function startup(conf,argv,standalone)
+   local selectedIo,loadconfCalls,activeGithub
+   local host={createloader=function() end,argv=argv or {}}
+   local env=setmetatable({app={},io=io,os={time=os.time},
+      mako=not standalone and host or false,xedge=host,
+      trace=function() end,tracep=function() end,
+      ba=setmetatable({openio=function(name) selectedIo=name return storage end},{__index=ba})
+   },{__index=_G})
+   env.require=function(name)
+      if name == "loadconf" then
+         assert(not standalone,"standalone Xedge requested loadconf")
+         loadconfCalls=(loadconfCalls or 0)+1
+         return conf or {}
+      end
+      if name == "GitHubIo" then return {create=function(options)
+         activeGithub=options.token
+         return {},{setToken=function(token) activeGithub=token end,validateToken=function() return true end}
+      end} end
+      if name == "appmgr" then return {} end
+      if name == "lab_archive" then return {create=function(_,options)
+         options.transferTtl=options.transferTtl or 60
+         options.transferReadTimeoutMs=options.transferReadTimeoutMs or 5000
+         options.transferTotalTimeoutSeconds=options.transferTotalTimeoutSeconds or 30
+         return options
+      end} end
+      return require(name)
+   end
+   assert(load(source,"settings-startup","t",env))()
+   check(selectedIo == (standalone and "disk" or "home"),"host storage selection")
+   check((loadconfCalls or 0) == (standalone and 0 or 1),"guarded loadconf")
+   return env.app,function() return activeGithub end
+end
+clear()
+local token="settings-test-mcp-token"
+local conf={GITHUB_TOKEN="github-bootstrap",MCP_AUTH_TOKEN=token,LSP_CLAW_TRANSFER_TTL_SECONDS=120}
+local args={"-token","ignored-bootstrap-token"}
+local app,github=startup(conf,args)
+check(select(2,app.getTokens()) == token,"Mako token wins before CLI bootstrap")
+check(args[1] == "-token" and args[2] == "ignored-bootstrap-token","shared arguments remain intact")
+local _,active=app.getTransferSettings()
+check(active.transferTtl == 120 and active.transferReadTimeoutMs == 5000,"Mako overrides and defaults")
+check(conf.transferTtl == nil and conf.LSP_CLAW_TRANSFER_TTL_SECONDS == 120,"shared configuration unchanged")
+local first=assert(rw.file(base,keyFile))
+check(first:sub(1,4) == "LCK2" and not first:find(token,1,true),"versioned encrypted record")
+assert(app.saveTokens("github-bootstrap",token))
+local second=assert(rw.file(base,keyFile))
+check(first:sub(5,16) ~= second:sub(5,16),"fresh IV for each save")
+assert(app.saveTransferSettings{transferTtl=7})
+check(active.transferTtl == 120,"advanced save applies after reload")
+app=startup(conf)
+local saved
+saved,active=app.getTransferSettings()
+check(saved.transferTtl == 7 and active.transferTtl == 7,"saved transfer override survives reload")
+for _,value in ipairs({0,-1,0.5,"bad",math.huge,2147483648}) do
+   check(not app.saveTransferSettings{transferTtl=value},"invalid duration rejected")
+end
+local before=assert(rw.file(base,settingsFile))
+failWrite=true
+check(not app.saveTransferSettings{transferTtl=8},"failed write reported")
+failWrite=false
+check(rw.file(base,settingsFile) == before,"failed write preserves saved settings")
+failRename=true
+check(not app.saveTokens(nil,"new-settings-test-token"),"failed replacement reported")
+failRename=false
+check(select(2,app.getTokens()) == token,"failed replacement preserves active token")
+app=startup(conf)
+check(select(2,app.getTokens()) == token,"failed replacement preserves stored token")
+failRename,failRestore=true,true
+-- Allow the preliminary recovery check, then fail rollback of an existing file.
+local realRename=storage.rename
+storage.rename=function(self,old,new)
+   if old:sub(-4) == ".bak" and not base:stat(old) then return nil,"notfound" end
+   return realRename(self,old,new)
+end
+check(not app.saveTokens(nil,"new-settings-test-token"),"failed rollback reported")
+failRename=false
+check(not app.saveTokens(nil,"new-settings-test-token"),"retry preserves unrecovered backup")
+failRestore=false
+storage.rename=realRename
+app=startup(conf)
+check(select(2,app.getTokens()) == token,"failed rollback backup remains recoverable")
+failClose=true
+check(not app.saveTokens(nil,"new-settings-test-token"),"failed close reported")
+failClose=false
+assert(app.saveTransferSettings{})
+app=startup(conf)
+_,active=app.getTransferSettings()
+check(active.transferTtl == 120,"reset restores Mako defaults")
+assert(app.saveTokens(nil,nil))
+app=startup(conf)
+check(app.getTokens() == nil and select(2,app.getTokens()) == nil,"cleared tokens do not inherit old configuration")
+app=startup(conf,{"-token",token})
+check(select(2,app.getTokens()) == token,"CLI fills explicitly absent MCP token")
+-- A retained backup is recovered after interruption of record replacement.
+assert(base:rename(keyFile,keyFile..".bak"))
+app=startup(conf)
+check(select(2,app.getTokens()) == token,"interrupted save recovers backup")
+clear()
+-- Xedge32 reports absent files as enoent, including rename/remove failures.
+missingError="enoent"
+local xapp,xgithub=startup({},nil,true)
+assert(xapp.saveTokens("xedge-github",token))
+check(xgithub() == "xedge-github","GitHub token changes immediately")
+assert(xapp.saveTransferSettings{transferReadTimeoutMs=2500})
+xapp=startup({},nil,true)
+_,active=xapp.getTransferSettings()
+check(select(2,xapp.getTokens()) == token and active.transferReadTimeoutMs == 2500,"standalone Xedge persistence without getenv/loadconf")
+assert(xapp.saveTokens("xedge-github",token))
+assert(base:rename(keyFile,keyFile..".bak"))
+xapp=startup({},nil,true)
+check(select(2,xapp.getTokens()) == token,"enoent startup recovers retained backup")
+missingError="notfound"
+-- Existing fixed-IV files remain readable and migrate on the next save.
+clear()
+local key=ba.crypto.hash"sha256"(ba.tpm.uniquekey("LSP-Claw-Keys",32))(true)
+local cipher,tag=ba.crypto.symmetric("GCM",key,"0123456789AB"):encrypt(ba.json.encode{authToken=token})
+assert(rw.file(base,keyFile,tag..cipher))
+app=startup({})
+check(select(2,app.getTokens()) == token,"legacy record remains readable")
+assert(app.saveTokens(nil,token))
+check(assert(rw.file(base,keyFile)):sub(1,4) == "LCK2","legacy record migrates on save")
+local valid=assert(rw.file(base,keyFile))
+for _,bad in ipairs({"",valid:sub(1,20),valid:sub(1,-2)..string.char((valid:byte(-1)+1)%256)}) do
+   assert(rw.file(base,keyFile,bad))
+   check(not pcall(startup,{}),"invalid credentials fail startup closed")
+end
+clear()
+assert(rw.file(base,settingsFile,"{bad"))
+check(not pcall(startup,{}),"corrupt transfer settings fail startup")
+clear()
+trace("SETTINGS_TEST_PASS",passed)
+mako.exit(0)

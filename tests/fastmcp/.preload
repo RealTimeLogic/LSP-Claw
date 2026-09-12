@@ -157,6 +157,7 @@ check(not FastMCP.pcall(Http.streamable, mcp, {resumable=true}), "false resumabi
 local function command(method, headers, chunks)
    local cmd = { status=0, responseHeaders={}, output="", headers=headers or {}, chunks=chunks or {} }
    function cmd:method() return method end
+   function cmd:issecure() return false end
    function cmd:header(name)
       local wanted = string.lower(name)
       for k, v in pairs(self.headers) do if string.lower(k) == wanted then return v end end
@@ -173,6 +174,13 @@ local function command(method, headers, chunks)
 end
 
 local initialize = Dispatcher.jsonEncode({jsonrpc="2.0",id=1,method="initialize",params={protocolVersion="2025-11-25"}})
+-- Multiple roots must not be silently truncated by the BAS decoder wrapper.
+for _, suffix in ipairs({"{}", "{}{}", "garbage"}) do
+   local invalid = command("POST", {["Content-Type"]="application/json"}, {initialize..suffix})
+   Http.handle(mcp, invalid)
+   equal(invalid.status, 400, "invalid JSON body rejected: "..suffix)
+   equal(assert(ba.json.decode(invalid.output)).error.code, -32700, "JSON parse error")
+end
 local wrongType = command("POST", { ["Content-Type"]="text/plain" }, {initialize})
 Http.handle(mcp, wrongType)
 equal(wrongType.status, 415, "content type enforced")
@@ -186,6 +194,12 @@ local direct = command("POST", { ["Content-Type"]="application/json", Host="dire
 Http.handle(mcp, direct)
 local directJson = assert(ba.json.decode(direct.output))
 equal(directJson.result._meta.serverOrigin, "http://direct.example", "forwarded headers ignored by default")
+-- A direct TLS connection determines the scheme, even with forged headers.
+function direct:issecure() return true end
+direct.headers["X-Forwarded-Proto"]="http"
+Http.handle(mcp, direct)
+equal(assert(ba.json.decode(direct.output)).result._meta.serverOrigin,
+      "https://direct.example", "direct TLS scheme and ignored forwarded headers")
 local trusted = command("POST", { ["Content-Type"]="application/json", Host="direct.example", ["X-Forwarded-Host"]="proxy.example", ["X-Forwarded-Proto"]="https" }, {initialize})
 Http.handle(mcp, trusted, {trustForwardedHeaders=true})
 local trustedJson = assert(ba.json.decode(trusted.output))

@@ -18,10 +18,10 @@ local function trimToNil(value)
    return value
 end
 
-local githubToken, authToken = app.getSetTokens()
+local githubToken, authToken = app.getTokens()
 local githubTokenInput = githubToken
 local authTokenInput = authToken
-local action = request:data("action")
+local action = request:method() == "POST" and request:data("action")
 local message, errorMessage, githubTokenError, authTokenError
 
 if action == "logout" then
@@ -58,7 +58,7 @@ if action == "save" and authorized then
       if not saved then
          errorMessage="Token settings could not be saved: "..tostring(saveErr or "unknown error")
       else
-         githubToken, authToken = app.getSetTokens()
+         githubToken, authToken = app.getTokens()
          githubTokenInput = githubToken
          authTokenInput = authToken
          authRequired = authToken ~= nil and authToken ~= ""
@@ -68,6 +68,20 @@ if action == "save" and authorized then
       end
    end
 end
+
+if authorized and (action == "saveTransfer" or action == "resetTransfer") then
+   local values={}
+   if action == "saveTransfer" then
+      for _,field in ipairs(app.transferFields) do
+         local value=trimToNil(request:data(field[1]))
+         if value then values[field[1]]=tonumber(value) or value end
+      end
+   end
+   local ok,err=app.saveTransferSettings(values)
+   if ok then message="Transfer settings saved. Reload LSP-Claw to apply them."
+   else errorMessage="Transfer settings were not saved: "..tostring(err) end
+end
+local transferSettings,activeTransfer=app.getTransferSettings()
 
 
 local labs, labsError
@@ -169,6 +183,24 @@ local authSet = authToken ~= nil and authToken ~= ""
                <?lsp end ?>
             </div>
          </section>
+
+         <details class="panel"<?lsp= (action == "saveTransfer" or action == "resetTransfer") and " open" or "" ?>>
+            <summary class="panel-head">Advanced transfer settings</summary>
+            <div class="panel-body">
+               <p class="field-note">Leave a field blank to use Mako configuration or the built-in default. Changes apply after reloading LSP-Claw.</p>
+               <form method="post">
+                  <?lsp for _,field in ipairs(app.transferFields) do ?>
+                  <label for="<?lsp= field[1] ?>"><?lsp= field[3] ?></label>
+                  <input id="<?lsp= field[1] ?>" name="<?lsp= field[1] ?>" type="number" min="1" max="2147483647" step="1" value="<?lsp= html(transferSettings[field[1]]) ?>" placeholder="<?lsp= activeTransfer[field[1]] ?>">
+                  <p class="field-note">Currently active: <?lsp= activeTransfer[field[1]] ?></p>
+                  <?lsp end ?>
+                  <div class="actions">
+                     <button type="submit" name="action" value="saveTransfer">Save transfer settings</button>
+                     <button class="secondary" type="submit" name="action" value="resetTransfer" formnovalidate>Reset transfer settings</button>
+                  </div>
+               </form>
+            </div>
+         </details>
 
          <section class="panel" id="lab-manager">
             <div class="panel-head">

@@ -65,7 +65,7 @@ resources, prompts, lab behavior, and agent-facing instructions.
 `.preload` wires the application together. It owns:
 
 - Runtime detection and loader setup.
-- Token loading and encrypted token storage through `app.getSetTokens`.
+- Token loading and encrypted token storage through `app.getTokens` and `app.saveTokens`.
 - Optional one-time Mako MCP-token initialization.
 - GitHub IO creation.
 - Trace capture and trace forwarding.
@@ -121,9 +121,9 @@ Important behavior:
 
 FastMCP provides the MCP engine and HTTP transport. See [FastMCP.md](FastMCP.md)
 for the current API, schema subset, limits, and transport contract. LSP-Claw
-explicitly trusts forwarded headers because it is commonly routed as an Xedge
-application; its front-end proxy must sanitize those headers. FastMCP ignores
-forwarded headers by default in other applications.
+uses the actual connection scheme and ignores forwarded headers. Proxy
+integrations must explicitly enable FastMCP's forwarded-header option and
+sanitize those headers.
 
 LSP-Claw uses the Streamable HTTP transport because runtime trace notifications
 are important to the AI workflow.
@@ -349,19 +349,23 @@ without editing behavior code.
 
 LSP-Claw has two token concerns:
 
-- `GITHUB_TOKEN` or `GH_TOKEN` for outbound GitHub API access.
+- `GITHUB_TOKEN` for outbound GitHub API access.
 - `MCP_AUTH_TOKEN` for inbound MCP bearer-token authentication.
 
-Under Mako, tokens can come from environment variables or `mako.conf`.
+Under Mako, `mako.conf` can initialize tokens when encrypted storage is absent.
+Saved page settings take precedence, including cleared values. Standalone
+Xedge uses the page and saved storage; server environment variables are not read.
 
 A small scan in `.preload` handles the optional one-time `-token` argument after
 existing encrypted token settings are loaded, but before the browser handlers
 and MCP transport are finalized. It changes only the MCP token and preserves the
 GitHub token.
 
-The browser page calls `app.getSetTokens(githubToken, authToken)`. Tokens saved
+The browser page reads `app.getTokens()` and writes the complete pair through
+`app.saveTokens(githubToken, authToken)`. Tokens saved
 this way are stored encrypted using key material derived from
-`ba.tpm.uniquekey`. The shared MCP-token validator requires 16 to 4096 bytes and
+`ba.tpm.uniquekey`, with a fresh GCM IV for each save. Existing records remain
+readable and migrate on save. Invalid records fail application startup. The shared MCP-token validator requires 16 to 4096 bytes and
 rejects NUL, CR, and LF for both bootstrap and browser saves.
 
 `getRuntimeInfo` reports whether each token is configured, but never returns a
@@ -369,13 +373,13 @@ token value. It also returns a configuration page URL template derived from
 `dir:baseuri()`. The normalized base URI ends with `/`:
 
 ```text
-http://<mcp-server-address><base-uri>lsp-claw-config.lsp
+https://<mcp-server-address><base-uri>lsp-claw-config.lsp
 ```
 
 For example, if `dir:baseuri()` is empty, the configuration page is:
 
 ```text
-http://<mcp-server-address>/lsp-claw-config.lsp
+https://<mcp-server-address>/lsp-claw-config.lsp
 ```
 
 The application root and `index.lsp` redirect to this canonical page. Settings

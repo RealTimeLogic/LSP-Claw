@@ -14,6 +14,8 @@ Copy-Item (Join-Path $PSScriptRoot ".preload") $stage
 
 $compressedPath = Join-Path $stage "compressed.zip"
 $file = [IO.File]::Open($compressedPath,[IO.FileMode]::CreateNew)
+[IO.File]::WriteAllText((Join-Path $stage "mako.conf"),"home='./'`nhost='127.0.0.1'`nport=0`nsslport=0`n",[Text.UTF8Encoding]::new($false))
+
 try {
    $archive = [IO.Compression.ZipArchive]::new($file,[IO.Compression.ZipArchiveMode]::Create,$false)
    try {
@@ -29,7 +31,7 @@ finally { $file.Dispose() }
 try {
    $stdout = Join-Path $stage "stdout.log"
    $stderr = Join-Path $stage "stderr.log"
-   $process = Start-Process -FilePath $Mako -ArgumentList "-l::$stage" -WorkingDirectory $stage -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+   $process = Start-Process -FilePath $Mako -ArgumentList "-c mako.conf -l::." -WorkingDirectory $stage -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
    $deadline = (Get-Date).AddSeconds(15)
    $passed = $false
    do {
@@ -44,5 +46,6 @@ try {
 }
 finally {
    if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+   if (-not ([IO.Path]::GetFullPath($stage)).StartsWith(([IO.Path]::GetFullPath($env:TEMP)).TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) { throw "Unexpected test directory" }
    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
 }

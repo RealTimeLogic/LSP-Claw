@@ -211,13 +211,13 @@ that automatically:
 - Configures the application base URL as:
 
 ```text
-http://ip-address/lsp-claw/
+https://ip-address/lsp-claw/
 ```
 
 The MCP server endpoint will therefore be:
 
 ```text
-http://ip-address/lsp-claw/mcp.lsp
+https://ip-address/lsp-claw/mcp.lsp
 ```
 
 ## Configure Tokens
@@ -296,26 +296,57 @@ an MCP token exists, later `-token` arguments are ignored and cannot replace it.
 See [Command-Line MCP Token](doc/Command-Line-Token.md) for validation and
 storage details.
 
-#### Environment MCP Token
+#### Mako Configuration
 
-Alternatively, set `MCP_AUTH_TOKEN` before the first Mako start. For Linux:
+Mako can initialize tokens from custom fields in `mako.conf`:
 
-```text
-MCP_AUTH_TOKEN='your-mcp-bearer-token'
-mako -l::lsp-claw.zip
+```lua
+-- Optional first-use credentials; the browser page can also set both tokens.
+GITHUB_TOKEN = "your-github-token"
+MCP_AUTH_TOKEN = "your-mcp-bearer-token"
 ```
 
-For Windows:
+LSP-Claw reads these fields through `require"loadconf"` only when the global
+`mako` exists. They initialize missing encrypted storage. An existing saved
+record wins, including tokens intentionally cleared through the page. A
+configured MCP token also takes precedence over `-token`. If you clear the MCP
+token and want it to remain absent, remove any `-token` startup argument.
 
-```powershell
-set MCP_AUTH_TOKEN = 'your-mcp-bearer-token'
-mako -l::lsp-claw.zip
-```
+Server environment variables, including `GH_TOKEN`, are no longer read.
+Standalone Xedge uses the browser page and its saved settings. Existing token
+files remain readable and migrate to a fresh-IV encryption format on the next
+save. Invalid or unreadable credential files fail startup instead of silently
+disabling authentication.
 
-LSP-Claw imports and encrypts the environment token. Remove the environment
-variable after the successful first start unless it is intentionally managed by
-the service environment; a value left in the environment takes precedence
-again on later starts.
+### Advanced Transfer Settings
+
+The same configuration page contains three optional transfer settings under
+**Advanced transfer settings**. Tokens still take effect immediately; transfer
+settings apply on the next LSP-Claw application reload/start. Do not restart the
+whole embedded device just to reload this application.
+
+| Page field | Optional `mako.conf` key | Default | Unit |
+| --- | --- | --- | --- |
+| Ticket lifetime | `LSP_CLAW_TRANSFER_TTL_SECONDS` | 60 | seconds |
+| Transfer I/O timeout | `LSP_CLAW_TRANSFER_READ_TIMEOUT_MS` | 5000 | milliseconds |
+| Download time limit | `LSP_CLAW_TRANSFER_TOTAL_TIMEOUT_SECONDS` | 30 | seconds |
+
+Values are positive integers from 1 through 2147483647. Blank fields inherit
+Mako configuration, where available, then the archive module's default.
+**Reset transfer settings** clears all page overrides. Saved overrides take
+precedence over Mako configuration. Mako configuration changes require the
+normal Mako restart.
+
+Non-secret page overrides are stored in `LSP-Claw-Settings.json`, alongside the
+encrypted `LSP-Claw-Keys.bin` in writable host storage. Saving transfer settings
+does not rewrite or validate either token. The download deadline currently
+covers the body-reading loop; it is not a complete connection-to-close deadline.
+
+`LSP_CLAW_GITHUB_API` remains an optional string in Mako configuration for
+trusted developer/test endpoints. Its default is `https://api.github.com`.
+It is not a normal page setting because it changes the GitHub credential's
+destination. The transfer port allowlist has been removed; URL validation and
+confirmation of the exact source origin remain.
 
 ## Configure Your AI Agent
 
@@ -324,7 +355,7 @@ again on later starts.
 > dedicated base URL [as explained above](#running-lsp-claw) to avoid URL
 > conflicts with the lab app, which also runs as a root app. When LSP-Claw is
 > installed as a packaged Xedge application, the MCP server URL is:
-> `http://ip-address/lsp-claw/mcp.lsp`.
+> `https://ip-address/lsp-claw/mcp.lsp`.
 
 
 First make sure the LSP-Claw server is running and reachable from the machine
@@ -335,8 +366,10 @@ endpoint is:
 http://localhost/mcp.lsp
 ```
 
-If LSP-Claw is running on another machine, replace `localhost` with that host
-name or IP address.
+For another machine, use its HTTPS URL with a certificate trusted by the
+client. The network examples below assume HTTPS is configured. Localhost HTTP
+remains suitable for local development; HTTP on an isolated lab network is an
+explicit deployment choice.
 
 Start the LSP-Claw MCP server before starting the AI agent or opening a new AI
 session. Most AI agents discover MCP tools only at startup, so a server that is
@@ -382,7 +415,7 @@ Codex client only; it does not set or change the token stored by LSP-Claw.
 For a remote server, use the remote URL instead:
 
 ```toml
-url = "http://192.168.1.50/mcp.lsp"
+url = "https://192.168.1.50/mcp.lsp"
 ```
 
 ### Develop on Mako, Transfer to Xedge/RTOS
@@ -394,14 +427,14 @@ use different bearer tokens:
 
 ```toml
 [mcp_servers.lsp_claw_mako]
-url = "http://192.168.1.50/lsp-claw/mcp.lsp"
+url = "https://192.168.1.50/lsp-claw/mcp.lsp"
 enabled = true
 startup_timeout_sec = 10
 tool_timeout_sec = 60
 bearer_token_env_var = "LSP_CLAW_MAKO_TOKEN"
 
 [mcp_servers.lsp_claw_xedge]
-url = "http://192.168.1.51/lsp-claw/mcp.lsp"
+url = "https://192.168.1.51/lsp-claw/mcp.lsp"
 enabled = true
 startup_timeout_sec = 10
 tool_timeout_sec = 60
@@ -616,7 +649,7 @@ The destination intentionally stops at a confirmation gate. After checking the
 reported origin, continue with a separate response such as:
 
 ```text
-Yes, http://192.168.1.50 is the expected source origin. Continue the transfer.
+Yes, https://192.168.1.50 is the expected source origin. Continue the transfer.
 ```
 
 The source snapshot and transfer ticket are short-lived and single-use. If the
@@ -864,3 +897,10 @@ If your AI agent cannot see LSP-Claw:
 If the endpoint responds but the AI agent still cannot see LSP-Claw tools, the
 AI agent probably discovered its MCP servers before LSP-Claw was available.
 Restart the AI agent or open a new session.
+
+### MCP Text Read Limit
+
+`readExampleFile`, `readLabFile`, and the example catalog reader accept at most
+1 MiB of text per file. Larger files return an error rather than a truncated
+result. Use lab archives for larger files. This bounds the application's read;
+GitHubIo may still allocate a complete upstream response before exposing it.

@@ -9,9 +9,6 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $root = Join-Path $env:TEMP ("lsp-claw-token-test-" + [guid]::NewGuid().ToString("N"))
 $processes = @()
 $launchNumber = 0
-$oldGitHubToken = $env:GITHUB_TOKEN
-$oldGhToken = $env:GH_TOKEN
-$oldMcpToken = $env:MCP_AUTH_TOKEN
 
 function Assert-True($Condition,[string]$Message) {
    if (-not $Condition) { throw $Message }
@@ -23,7 +20,7 @@ function New-Runtime([string]$Name) {
    Copy-Item -LiteralPath (Join-Path $repo "www") -Destination (Join-Path $path "www") -Recurse
    $hostLogin = '<?lsp if request:data("login") then request:login("host-user",2,true) end local u=request:user() or "" response:setheader("Content-Length",tostring(#u)) response:send(u) ?>'
    [IO.File]::WriteAllText((Join-Path $path "www\host-login.lsp"),$hostLogin,[Text.UTF8Encoding]::new($false))
-   [IO.File]::WriteAllText((Join-Path $path "mako.conf"),"port=$Port`r`nsslport=0`r`n",[Text.UTF8Encoding]::new($false))
+   [IO.File]::WriteAllText((Join-Path $path "mako.conf"),"host='127.0.0.1'`nport=$Port`nsslport=0`nhome='./'`n",[Text.UTF8Encoding]::new($false))
    return $path
 }
 
@@ -31,7 +28,7 @@ function Start-TestServer([string]$Runtime,[string[]]$ExtraArgs=@()) {
    $script:launchNumber++
    $stdout = Join-Path $Runtime ("stdout-$($script:launchNumber).log")
    $stderr = Join-Path $Runtime ("stderr-$($script:launchNumber).log")
-   $process = Start-Process -FilePath $Mako -ArgumentList (@("-llsp-claw::www") + $ExtraArgs) -WorkingDirectory $Runtime -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+   $process = Start-Process -FilePath $Mako -ArgumentList (@("-c","mako.conf","-llsp-claw::www") + $ExtraArgs) -WorkingDirectory $Runtime -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
    $script:processes += $process
    $deadline = (Get-Date).AddSeconds(15)
    $log = ""
@@ -110,9 +107,6 @@ function Assert-TokenFailure([string]$Name,[string[]]$Arguments,[string]$Expecte
 
 try {
    New-Item -ItemType Directory -Path $root -Force | Out-Null
-   $env:GITHUB_TOKEN=$null
-   $env:GH_TOKEN=$null
-   $env:MCP_AUTH_TOKEN=$null
 
    # -token sets only MCP authentication. GitHub remains blank.
    $runtime = New-Runtime "direct"
@@ -166,10 +160,9 @@ try {
    $githubRuntime = New-Runtime "github-preserved"
    $githubToken = "preserved-github-token"
    $mcpToken = "preserved-mcp-token-0123456789"
-   $env:GITHUB_TOKEN=$githubToken
+   Add-Content -LiteralPath (Join-Path $githubRuntime "mako.conf") -Value "GITHUB_TOKEN='$githubToken'"
    $server = Start-TestServer $githubRuntime @("-token",$mcpToken)
-   $env:GITHUB_TOKEN=$null
-   Assert-True $server.Started "MCP setup with an existing GitHub token failed"
+   Assert-True $server.Started "MCP setup with an existing GitHub token failed.`n$($server.Log)"
    Assert-True ((Login-Token $server $mcpToken).Response.Content -match [regex]::Escape($githubToken)) "MCP token setup changed the GitHub token"
    Assert-McpHandshake $server $mcpToken
    Stop-TestServer $server
@@ -189,9 +182,6 @@ try {
    Write-Output "COMMAND_LINE_TOKEN_TEST_PASS mcpOnly=true githubBlank=true encrypted=true oneTime=true firstWins=true githubPreserved=true validation=true browserLogin=true sharedSession=true separated=true"
 }
 finally {
-   $env:GITHUB_TOKEN=$oldGitHubToken
-   $env:GH_TOKEN=$oldGhToken
-   $env:MCP_AUTH_TOKEN=$oldMcpToken
    foreach ($process in $processes) {
       if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
    }

@@ -5,6 +5,7 @@ the repository root before packaging a modified checkout:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/fastmcp/Test-FastMCP.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/settings/Test-Settings.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-CommandLineToken.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-TokenSetup.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/lab-management/Test-LabManagement.ps1
@@ -15,7 +16,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests/Test-LSP-Claw.ps1
 
 The harnesses perform these tests in order:
 
-1. Isolate and test generic FastMCP.
+1. Isolate and test generic FastMCP, then test settings precedence, migration,
+   failed writes, recovery, and simulated standalone-Xedge configuration.
 2. Verify command-line MCP-token initialization, GitHub-token preservation,
    encrypted persistence, one-time behavior, settings login, and auth
    separation.

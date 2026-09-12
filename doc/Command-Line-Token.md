@@ -15,6 +15,12 @@ command-line values are ignored and cannot replace it. The token uses the same
 TPM-derived encrypted `LSP-Claw-Keys.bin` storage and validator as the settings
 page.
 
+Saved credentials are loaded before optional `mako.conf` initialization. A
+configured token wins over the startup argument. Clearing a token on the page
+persists that choice over Mako configuration, but a remaining `-token` argument
+will initialize MCP again on the next startup. The shared `mako.argv` table is
+never modified, so bundled tools can process the same arguments.
+
 When no MCP token exists, the browser settings page is open. Once configured,
 the token also unlocks that page. A browser session never authorizes the MCP
 endpoint; MCP clients must send `Authorization: Bearer <token>`.

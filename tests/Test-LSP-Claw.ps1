@@ -1,6 +1,6 @@
 param(
    [string]$Mako = "mako",
-   [int]$Port = 80
+   [int]$Port = 18089
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,13 +13,11 @@ $stdout = Join-Path $stage "stdout.log"
 $stderr = Join-Path $stage "stderr.log"
 $script:requestId = 0
 $script:testToken = "lsp-claw-regression-token"
-$previousAuthToken = $env:MCP_AUTH_TOKEN
-$env:MCP_AUTH_TOKEN = $script:testToken
 $process = $null
 
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 Copy-Item (Join-Path $repo "www") (Join-Path $stage "www") -Recurse
-[IO.File]::WriteAllText((Join-Path $stage "mako.conf"),"port=$Port`r`nsslport=0`r`n",[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText((Join-Path $stage "mako.conf"),"host='127.0.0.1'`nport=$Port`nsslport=0`nhome='./'`n",[Text.UTF8Encoding]::new($false))
 $staleImportStage = Join-Path $stage "LSPClawImport-stage-stale"
 New-Item -ItemType Directory -Path $staleImportStage | Out-Null
 [IO.File]::WriteAllText((Join-Path $staleImportStage "partial.txt"),"discard")
@@ -115,7 +113,7 @@ function Assert-ZipUploadRejected([string]$Url,[string]$ZipPath,[string]$Message
 }
 
 try {
-   $process = Start-Process -FilePath $Mako -ArgumentList "-llsp-claw::www" -WorkingDirectory $stage -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+   $process = Start-Process -FilePath $Mako -ArgumentList "-c mako.conf -llsp-claw::www -token $($script:testToken)" -WorkingDirectory $stage -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
    $deadline = (Get-Date).AddSeconds(15)
    do {
       Start-Sleep -Milliseconds 200
@@ -329,6 +327,6 @@ try {
 }
 finally {
    if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+   if (-not ([IO.Path]::GetFullPath($stage)).StartsWith(([IO.Path]::GetFullPath($env:TEMP)).TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) { throw "Unexpected test directory" }
    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-   $env:MCP_AUTH_TOKEN = $previousAuthToken
 }

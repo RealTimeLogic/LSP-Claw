@@ -6,7 +6,7 @@ local sfmt=string.format
 local tinsert=table.insert
 local rw=require"rwfile"
 
-local registry,labsByName,labsByKey
+local registry,labsByKey
 
 local function filePath(path,file)
    return #path > 0 and path.."/"..file or file
@@ -42,7 +42,8 @@ local function recDirIter(io,curPath,ldir)
       end
    )
    return function()
-      coroutine.resume(co)
+      local ok,err=coroutine.resume(co)
+      if not ok then error(err,0) end
       return curPath, name
    end
 end
@@ -119,10 +120,8 @@ local function saveRegistry()
 end
 
 local function indexRegistry()
-   labsByName={}
    labsByKey={}
    for _,info in ipairs(registry.labs) do
-      labsByName[info.name]=info
       labsByKey[info.name:lower()]=info
    end
 end

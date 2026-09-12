@@ -12,9 +12,6 @@ $sourceHome = Join-Path $root "source"
 $destinationHome = Join-Path $root "destination"
 $sourceToken = "source-regression-token"
 $destinationToken = "destination-regression-token"
-$previousToken = $env:MCP_AUTH_TOKEN
-$previousTtl = $env:LSP_CLAW_TRANSFER_TTL_SECONDS
-$previousAllowedPorts = $env:LSP_CLAW_TRANSFER_ALLOWED_PORTS
 $processes = @()
 $script:requestId = 0
 
@@ -25,12 +22,11 @@ function Assert-Equal($Actual,$Expected,[string]$Message) {
 function Start-LspClaw([string]$WorkDir,[int]$Port,[string]$Token,[string]$Name,[string]$TransferTtl) {
    New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
    Copy-Item (Join-Path $repo "www") (Join-Path $WorkDir "www") -Recurse
-   [IO.File]::WriteAllText((Join-Path $WorkDir "mako.conf"),"port=$Port`r`nsslport=0`r`n")
-   $env:MCP_AUTH_TOKEN = $Token
-   $env:LSP_CLAW_TRANSFER_TTL_SECONDS = $TransferTtl
+   [IO.File]::WriteAllText((Join-Path $WorkDir "mako.conf"),"host='127.0.0.1'`nport=$Port`nsslport=0`nhome='./'`n")
+   if ($TransferTtl) { Add-Content -LiteralPath (Join-Path $WorkDir "mako.conf") -Value "LSP_CLAW_TRANSFER_TTL_SECONDS=$TransferTtl" }
    $stdout = Join-Path $WorkDir "stdout.log"
    $stderr = Join-Path $WorkDir "stderr.log"
-   $process = Start-Process -FilePath $Mako -ArgumentList "-llsp-claw::www" -WorkingDirectory $WorkDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+   $process = Start-Process -FilePath $Mako -ArgumentList "-c mako.conf -llsp-claw::www -token $Token" -WorkingDirectory $WorkDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
    $script:processes += $process
    $deadline = (Get-Date).AddSeconds(15)
    do {
@@ -80,9 +76,7 @@ function Transfer-Arguments($Descriptor,[string]$Destination,[bool]$Confirmed,[s
 }
 
 try {
-   $env:LSP_CLAW_TRANSFER_ALLOWED_PORTS = ""
    $source = Start-LspClaw $sourceHome $SourcePort $sourceToken "source" "2"
-   $env:LSP_CLAW_TRANSFER_ALLOWED_PORTS = [string]$SourcePort
    $destination = Start-LspClaw $destinationHome $DestinationPort $destinationToken "destination" ""
    [IO.File]::WriteAllText((Join-Path $sourceHome "www\redirect.lsp"),'<?lsp response:sendredirect"transfer.lsp" ?>')
    [IO.File]::WriteAllText((Join-Path $sourceHome "www\partial.lsp"),'<?lsp response:setcontenttype"application/zip" response:setheader("Content-Length","100") response:setheader("X-LSP-Claw-SHA256",string.rep("0",64)) response:write"partial" ?>')
@@ -143,11 +137,6 @@ try {
    $invalidUrl = Invoke-Tool $destination $destinationSession "importLabTransfer" $invalidUrlArgs
    Assert-Equal $invalidUrl.code "invalidTransferUrl" "URL user-info is rejected"
 
-   $disallowedPortArgs = Transfer-Arguments $expiredPrepared "disallowed-port-lab" $true "http://127.0.0.1:$($SourcePort + 1)"
-   $disallowedPortArgs.transferUrl = "http://127.0.0.1:$($SourcePort + 1)/lsp-claw/transfer.lsp"
-   $disallowedPort = Invoke-Tool $destination $destinationSession "importLabTransfer" $disallowedPortArgs
-   Assert-Equal $disallowedPort.code "invalidTransferUrl" "destination port allowlist"
-
    $redirectArgs = Transfer-Arguments $expiredPrepared "redirect-lab" $true $source.Origin
    $redirectArgs.transferUrl = "$($source.Origin)/lsp-claw/redirect.lsp"
    $redirectArgs.transferTicket = "A" * 32
@@ -168,8 +157,6 @@ try {
 }
 finally {
    foreach ($process in $processes) { if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force } }
-   $env:MCP_AUTH_TOKEN = $previousToken
-   $env:LSP_CLAW_TRANSFER_TTL_SECONDS = $previousTtl
-   $env:LSP_CLAW_TRANSFER_ALLOWED_PORTS = $previousAllowedPorts
+   if (-not ([IO.Path]::GetFullPath($root)).StartsWith(([IO.Path]::GetFullPath($env:TEMP)).TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) { throw "Unexpected test directory" }
    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }

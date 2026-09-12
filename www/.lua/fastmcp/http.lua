@@ -97,13 +97,6 @@ local function readBody(cmd, maxBytes)
    return table.concat(body)
 end
 
-local function decodeJson(body)
-   local ok,result,err = pcall(ba.json.decode,body)
-   if not ok then return nil,"Invalid JSON" end
-   if result == nil then return nil,err or "Invalid JSON" end
-   return result
-end
-
 local function headerIncludes(value, token)
    if not value then return false end
    return string.find(string.lower(value), string.lower(token), 1, true) ~= nil
@@ -147,7 +140,7 @@ local function requestServer(cmd, trustForwardedHeaders)
    if not host then return nil end
    local proto = (trustForwardedHeaders and safeProto(cmd:header("X-Forwarded-Proto"))) or
 	 (trustForwardedHeaders and safeProto(forwardedParam(forwarded, "proto"))) or
-	 "http"
+	 (cmd:issecure() and "https" or "http")
    return {
       origin = proto .. "://" .. host,
       host = host,
@@ -587,7 +580,7 @@ function Streamable:handlePost(cmd)
       return
    end
 
-   local req, jsonErr = decodeJson(body)
+   local req, jsonErr = ba.json.decode(body)
    if not req then
       sendStreamableJson(self, cmd, jsonRpcError(nil, -32700, jsonErr), 400, origin)
       return
@@ -723,7 +716,7 @@ function Http.handle(mcp,cmd,options)
       return
    end
 
-   local req,jsonErr = decodeJson(body)
+   local req,jsonErr = ba.json.decode(body)
    if not req then
       sendJson(cmd,Dispatcher.jsonRpcError(nil,-32700,jsonErr),400,maxResponseBytes)
       return

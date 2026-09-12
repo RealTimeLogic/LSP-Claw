@@ -419,7 +419,7 @@ local function configurationStatus(ctx)
 	 path = setupPath,
 	 url = absoluteUrl(origin, setupPath),
 	 serverOrigin = origin,
-	 urlTemplate = "http://<mcp-server-address>" .. setupPath,
+	 urlTemplate = "https://<mcp-server-address>" .. setupPath,
 	 guidance = "When LSP-Claw is already running, configure tokens from the browser configuration page. Use setupPage.url when present; otherwise replace <mcp-server-address> in urlTemplate with the host or IP address serving this MCP app."
       }
    }, warnings
@@ -465,20 +465,22 @@ local function runtimeInfo(appmgr,ctx,lab)
    }
 end
 
-local function readText(io, path, limit)
-   local data, err = rw.file(io, path)
-   if not data then return nil, err end
-   if limit and #data > limit then
-      return data:sub(1, limit), true
-   end
-   return data, false
+-- Reject oversized MCP text before allocating the complete file/response.
+local function readText(io, path)
+   local fp,err=io:open(path,"rb")
+   if not fp then return nil,err end
+   local data,readErr=fp:read(1024*1024+1)
+   local ok,closeErr=fp:close()
+   if readErr or not ok then return nil,readErr or closeErr end
+   if data and #data > 1024*1024 then return nil,"text file exceeds 1 MiB limit" end
+   return data or ""
 end
 
 local function writeText(io, path, content)
    return rw.file(io, path, content or "")
 end
 
-local exampleCatalogLoaded, exampleCatalogCache, exampleCatalogError = false, nil, nil
+local exampleCatalogCache
 local exampleCatalogPath = ".ai/main-ai-catalog.json"
 
 local function copyList(list)
@@ -488,20 +490,13 @@ local function copyList(list)
 end
 
 local function loadExampleCatalog(ghio)
-   if exampleCatalogLoaded then return exampleCatalogCache, exampleCatalogError end
-   exampleCatalogLoaded = true
-   local text, err = readText(ghio, exampleCatalogPath)
-   if not text then
-      exampleCatalogError = err or "not found"
-      return nil, exampleCatalogError
-   end
-   local ok, decoded = FastMCP.pcall(ba.json.decode, text)
-   if not ok or type(decoded) ~= "table" then
-      exampleCatalogError = tostring(decoded or "invalid JSON")
-      return nil, exampleCatalogError
-   end
-   exampleCatalogCache = decoded
-   return exampleCatalogCache
+   if exampleCatalogCache then return exampleCatalogCache end
+   local text,err=readText(ghio,exampleCatalogPath)
+   if not text then return nil,err or "not found" end
+   local ok,decoded,extra=FastMCP.pcall(ba.json.decode,text)
+   if not ok or type(decoded) ~= "table" or extra ~= nil then return nil,"invalid catalog JSON" end
+   exampleCatalogCache=decoded
+   return decoded
 end
 
 local function catalogEntries(catalog)
@@ -726,7 +721,7 @@ local function ensureParentDirs(io, path)
    return true
 end
 
-local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo, archiveManager)
+local function registerTools(mcp, ghio, appmgr, runtimeTrace, infoIo, archiveManager)
    mcp:tool("getRuntimeInfo", {
       description = "Return server-global Mako/Xedge runtime, configuration, and lab-capacity details. This tool does not require or change lab selection.",
       inputSchema = objectSchema(),
@@ -742,18 +737,6 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo, arch
       inputSchema = objectSchema(),
       annotations = readAnnotations
    }, function()
-      if not runtimeTrace or type(runtimeTrace.read) ~= "function" then
-	 return result("Runtime trace buffering is not configured.", nil, {
-	    trace = "",
-	    bytes = 0,
-	    messageCount = 0,
-	    bufferSize = 0,
-	    enabled = false,
-	    cleared = true,
-	    scope = "server-global",
-	    labAttributionReliable = false
-	 })
-      end
       local data = runtimeTrace.read()
       data.scope="server-global"
       data.labAttributionReliable=false
@@ -997,7 +980,7 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo, arch
             destinationLabName=stringSchema("Destination lab name explicitly provided by the user."),
             conflictAction=enumSchema({"createNew","replace"},"Create a new lab or completely replace a stopped lab."),
             confirmed=boolSchema("True only after the user confirms the displayed source origin and any replacement.",false),
-            confirmedSourceOrigin=stringSchema("Exact source origin shown in the confirmation request, for example http://device-1.")
+            confirmedSourceOrigin=stringSchema("Exact source origin shown in the confirmation request, for example https://device-1.")
          },{"transferUrl","transferTicket","expectedBytes","digest","destinationLabName","conflictAction"}),
          annotations=destructiveAnnotations
       }, function(args,ctx)
@@ -1459,7 +1442,7 @@ local function registerTools(mcp, ghio, info, appmgr, runtimeTrace, infoIo, arch
    end)
 end
 
-local function registerResources(mcp, ghio, info, appmgr, instructions, infoIo)
+local function registerResources(mcp, ghio, appmgr, instructions, infoIo)
    mcp:resource("lspclaw://instructions", {
       name = "LSP-Claw Instructions",
       description = "Stable server instructions for agents using LSP-Claw.",
@@ -1558,13 +1541,13 @@ local function registerPrompts(mcp, io)
    end)
 end
 
-function M.register(mcp, ghio, info, appmgr, options)
+function M.register(mcp, ghio, appmgr, options)
    options = options or {}
    infoContentIo = options.io
    configurationStatusProvider = options.configurationStatus
    local runtimeTrace = setupRuntimeTrace(options.runtimeTrace, options.runtimeTraceBufferSize)
-   registerTools(mcp, ghio, info, appmgr, runtimeTrace, options.io, options.archiveManager)
-   registerResources(mcp, ghio, info, appmgr, options.instructions, options.io)
+   registerTools(mcp, ghio, appmgr, runtimeTrace, options.io, options.archiveManager)
+   registerResources(mcp, ghio, appmgr, options.instructions, options.io)
    registerPrompts(mcp, options.io)
    return mcp
 end
