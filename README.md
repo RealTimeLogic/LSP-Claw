@@ -1,62 +1,30 @@
-# LSP-Claw Quick Start
+# LSP-Claw: MCP Server for BAS Derivative Products
 
-This quick start is for running LSP-Claw with the Mako Server Developer
-Edition. See the [detailed instructions](Instructions.md) for other setups, including using [Xedge standalone](https://realtimelogic.com/products/xedge/), configuration options, lab management, backups, transfers, and tutorials.
+LSP-Claw lets an AI agent work with Barracuda App Server (**BAS**) based
+tools such as [Mako Server](https://makoserver.net/),
+[Xedge](https://realtimelogic.com/products/xedge/), and
+[Xedge32](https://realtimelogic.com/downloads/bas/ESP32/?bas=) through an
+MCP server. Instead of asking an AI agent, such as Codex, to edit random
+local files, you give it access to a controlled lab app where it can
+inspect examples, create files, run the lab, and debug server-side
+Lua/LSP code.
+
+> **New to LSP-Claw?** Watch the
+> [LSP-Claw introduction video](https://youtu.be/z3wQHM6MDC4) for a
+> high-level overview of what LSP-Claw is and how it fits into
+> AI-assisted Mako/Xedge development.
 
 ![LSP-Claw](www/LSP-Claw-Icon.png "LSP-Claw")
 
-## Start Device Interfaces with Light Dashboard
+LSP-Claw is especially useful for embedded systems. LSP-Claw can remotely
+start, stop, and replace the application being tested without restarting
+the device, RTOS, or hosting server. A monolithic RTOS device can keep
+running its core firmware while the MCP server restarts only the lab app.
+
+## Example Prompt: Designing a Web Device Interface
 
 For device-management applications, use
-[Light-Dashboard](https://github.com/RealTimeLogic/LSP-Examples/tree/master/Light-Dashboard).
-
-## What You Need
-
-- An AI agent with [MCP support](Instructions.md#what-mcp-means-here), such as Codex, installed on your computer.
-- The [Mako Server Developer Edition](https://makoserver.net/documentation/developer-package/#makozip). Running Mako as a service is preferred. The [download page](https://makoserver.net/download/overview/) includes a prompt you can give your AI agent to guide you through downloading, installing, and running it as a service.
-
-## Connect LSP-Claw
-
-1. Install and start Mako using the Developer Edition instructions. You may
-   optionally initialize the MCP authentication token on the first start:
-
-   ```text
-   mako -token your-mcp-bearer-token
-   ```
-
-   See the [command-line token instructions](Instructions.md#command-line-mcp-token).
-2. Open [http://localhost/lsp-claw/](http://localhost/lsp-claw/). If you set an
-   MCP token, use it to sign in. To access the LSP-Examples repository through
-   LSP-Claw, enter a GitHub token and click **Save tokens**.
-3. Add an MCP server named `lsp_claw` to your AI agent using this URL:
-
-   ```text
-   http://localhost/lsp-claw/mcp.lsp
-   ```
-
-4. Restart the agent or open a new session so it discovers LSP-Claw. See
-   [Configure Your AI Agent](Instructions.md#configure-your-ai-agent) if you
-   need agent-specific configuration details.
-
-## Getting Started
-
-The Mako Server Developer Edition is the easiest way to get started because it
-includes LSP-Claw and the required Mako resources in one ready-to-run package.
-This avoids manually installing and configuring the application.
-
-[![Mako Server Developer Edition](https://makoserver.net/images/MakoZipDeveloperEdition.png)](https://makoserver.net/documentation/developer-package/)
-
-## First Prompts
-
-Prime the agent before asking it to build anything:
-
-```text
-Use LSP-Claw for this session. Check the runtime and lab status, list the
-available labs, and tell me what you found. Do not change anything yet. Work
-only through LSP-Claw; if its tools are unavailable, stop and tell me.
-```
-
-Build a device management interface:
+[Light-Dashboard](https://github.com/RealTimeLogic/LSP-Examples/tree/master/Light-Dashboard/).
 
 ```text
 Use LSP-Claw to build a device management interface using
@@ -65,9 +33,48 @@ live data, commands, and visual style I need. Build and test the interface and
 give me its URL.
 ```
 
-## Detailed Documentation
+## Mako and Xedge LSP-Claw Quick Start
 
-Continue with the
-[complete LSP-Claw installation and usage guide](Instructions.md) for AI-agent
-configuration, additional prompts, alternative installations, lab management,
-backups, transfers, and tutorials.
+Start with downloading the latest pre-built LSP-Claw: [https://makoserver.net/download/packages/lsp-claw.zip](https://makoserver.net/download/packages/lsp-claw.zip)
+
+
+#### Using [Mako Server](https://makoserver.net/)
+
+>Alternative to the instructions below: use the **[Mako Server Developer Edition](Mako-Server.md)**
+
+- Start Mako Server: ```mako -llsp-claw::lsp-claw.zip```
+- Navigate to http://localhost/lsp-claw/ to configure LSP-Claw
+- Configure your AI Agent (MCP endpoint: http://localhost/lsp-claw/mcp.lsp) and start using LSP-Claw
+
+See the [detailed instructions](Instructions.md) for details, including using LSP-Claw and the prompt tutorial. See also [Mako Server Developer Edition](Mako-Server.md).
+
+
+#### Using [Xedge](https://realtimelogic.com/products/xedge/) and Derivatives such as [Xedge32](https://realtimelogic.com/downloads/bas/ESP32/)
+
+- Navigate to the Xedge UI: http://ip-addr/rtl/
+- Click the menu button in the top right corner
+- Click App Upload (or Firmware Update & App Upload)
+- Drag and drop lsp-claw.zip onto the web UI to upload LSP-Claw
+- Navigate to http://ip-addr/lsp-claw/ to configure LSP-Claw
+- Configure your AI Agent (MCP endpoint: http://ip-address/lsp-claw/mcp.lsp) and start using LSP-Claw
+
+See the [detailed instructions](Instructions.md) for details, including using LSP-Claw and the prompt tutorial.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

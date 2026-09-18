@@ -1,49 +1,5 @@
 # LSP-Claw Detailed Instructions
 
-LSP-Claw lets an AI agent work with Barracuda App Server (**BAS**) based
-tools such as [Mako Server](https://makoserver.net/),
-[Xedge](https://realtimelogic.com/products/xedge/), and
-[Xedge32](https://realtimelogic.com/downloads/bas/ESP32/?bas=) through an
-MCP server. Instead of asking an AI agent, such as Codex, to edit random
-local files, you give it access to a controlled lab app where it can
-inspect examples, create files, run the lab, and debug server-side
-Lua/LSP code.
-
-> **New to LSP-Claw?** Watch the
-> [LSP-Claw introduction video](https://youtu.be/z3wQHM6MDC4) for a
-> high-level overview of what LSP-Claw is and how it fits into
-> AI-assisted Mako/Xedge development.
-
-![LSP-Claw](www/LSP-Claw-Icon.png "LSP-Claw")
-
-LSP-Claw is especially useful for embedded systems. LSP-Claw can remotely
-start, stop, and replace the application being tested without restarting
-the device, RTOS, or hosting server. A monolithic RTOS device can keep
-running its core firmware while the MCP server restarts only the lab app.
-
-## Design a Device Interface
-
-For device-management applications, use
-[Light-Dashboard](https://github.com/RealTimeLogic/LSP-Examples/tree/master/Light-Dashboard/).
-
-```text
-Use LSP-Claw to build a device management interface using
-Light-Dashboard/custom. Check the runtime and lab, then ask what device, pages,
-live data, commands, and visual style I need. Build and test the interface and
-give me its URL.
-```
-
-## Recommended Package for Mako Users
-
-If you use Mako Server, the recommended starting point is the
-[Mako Server Development Package](https://makoserver.net/documentation/developer-package/).
-This package is designed for Mako-based development and includes the tooling
-needed to use LSP-Claw in a ready-to-run Mako environment.
-
-Use the standalone LSP-Claw ZIP or source build when you are integrating
-LSP-Claw into an existing Mako installation, an Xedge deployment, or an RTOS
-target that already has its own firmware and deployment workflow.
-
 ## What MCP Means Here
 
 MCP lets an AI agent use tools provided by another program. In this case:
@@ -211,13 +167,13 @@ that automatically:
 - Configures the application base URL as:
 
 ```text
-https://ip-address/lsp-claw/
+http://ip-address/lsp-claw/
 ```
 
 The MCP server endpoint will therefore be:
 
 ```text
-https://ip-address/lsp-claw/mcp.lsp
+http://ip-address/lsp-claw/mcp.lsp
 ```
 
 ## Configure Tokens
@@ -355,7 +311,7 @@ confirmation of the exact source origin remain.
 > dedicated base URL [as explained above](#running-lsp-claw) to avoid URL
 > conflicts with the lab app, which also runs as a root app. When LSP-Claw is
 > installed as a packaged Xedge application, the MCP server URL is:
-> `https://ip-address/lsp-claw/mcp.lsp`.
+> `http://ip-address/lsp-claw/mcp.lsp`.
 
 
 First make sure the LSP-Claw server is running and reachable from the machine
@@ -415,7 +371,7 @@ Codex client only; it does not set or change the token stored by LSP-Claw.
 For a remote server, use the remote URL instead:
 
 ```toml
-url = "https://192.168.1.50/mcp.lsp"
+url = "http://192.168.1.50/mcp.lsp"
 ```
 
 ### Develop on Mako, Transfer to Xedge/RTOS
@@ -427,14 +383,14 @@ use different bearer tokens:
 
 ```toml
 [mcp_servers.lsp_claw_mako]
-url = "https://192.168.1.50/lsp-claw/mcp.lsp"
+url = "http://192.168.1.50/lsp-claw/mcp.lsp"
 enabled = true
 startup_timeout_sec = 10
 tool_timeout_sec = 60
 bearer_token_env_var = "LSP_CLAW_MAKO_TOKEN"
 
 [mcp_servers.lsp_claw_xedge]
-url = "https://192.168.1.51/lsp-claw/mcp.lsp"
+url = "http://192.168.1.51/lsp-claw/mcp.lsp"
 enabled = true
 startup_timeout_sec = 10
 tool_timeout_sec = 60
@@ -649,7 +605,7 @@ The destination intentionally stops at a confirmation gate. After checking the
 reported origin, continue with a separate response such as:
 
 ```text
-Yes, https://192.168.1.50 is the expected source origin. Continue the transfer.
+Yes, http://192.168.1.50 is the expected source origin. Continue the transfer.
 ```
 
 The source snapshot and transfer ticket are short-lived and single-use. If the
