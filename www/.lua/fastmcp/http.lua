@@ -97,6 +97,15 @@ local function readBody(cmd, maxBytes)
    return table.concat(body)
 end
 
+local function decodeJsonDocument(body)
+   local values = table.pack(pcall(ba.json.decode, body))
+   if not values[1] then return nil, "Invalid JSON" end
+   if values.n ~= 2 or values[2] == nil then
+      return nil, values[3] or "Expected one JSON document"
+   end
+   return values[2]
+end
+
 local function headerIncludes(value, token)
    if not value then return false end
    return string.find(string.lower(value), string.lower(token), 1, true) ~= nil
@@ -580,7 +589,7 @@ function Streamable:handlePost(cmd)
       return
    end
 
-   local req, jsonErr = ba.json.decode(body)
+   local req, jsonErr = decodeJsonDocument(body)
    if not req then
       sendStreamableJson(self, cmd, jsonRpcError(nil, -32700, jsonErr), 400, origin)
       return
@@ -716,7 +725,7 @@ function Http.handle(mcp,cmd,options)
       return
    end
 
-   local req,jsonErr = ba.json.decode(body)
+   local req,jsonErr = decodeJsonDocument(body)
    if not req then
       sendJson(cmd,Dispatcher.jsonRpcError(nil,-32700,jsonErr),400,maxResponseBytes)
       return

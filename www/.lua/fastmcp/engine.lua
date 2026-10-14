@@ -90,8 +90,10 @@ function FastMCP.promptResult(result)
    return mark("promptResult", result)
 end
 
+local arrayMT = { __jsontype = "array" }
+
 function FastMCP.array(value)
-   return mark("array", value or {})
+   return setmetatable(value or {}, arrayMT)
 end
 
 function FastMCP.isError(value)
@@ -119,7 +121,8 @@ function FastMCP.isPromptResult(value)
 end
 
 function FastMCP.isArray(value)
-   return type(value) == "table" and value.fastmcpType == "array"
+   local mt = type(value) == "table" and getmetatable(value)
+   return type(mt) == "table" and rawget(mt, "__jsontype") == "array"
 end
 
 local function publicMeta(component)

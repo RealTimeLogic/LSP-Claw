@@ -104,26 +104,48 @@ equal(occurrences, 1, "re-registration order")
 check(mcp:capabilities().logging == nil, "logging not advertised")
 check(mcp:capabilities().tools.listChanged == false, "list changes not advertised")
 
--- Serializer rejects values that cannot be represented faithfully.
-equal(Dispatcher.jsonEncode(FastMCP.array()), "[]", "marked empty array")
+-- Use native JSON semantics while preserving empty arrays through MCP results.
+equal(Dispatcher.jsonEncode, ba.json.encode, "native encoder alias")
+local emptyArray = FastMCP.array()
+equal(Dispatcher.jsonEncode(emptyArray), "[]", "marked empty array")
+equal(next(emptyArray), nil, "array marker is not a payload field")
+check(FastMCP.isArray(emptyArray) and not FastMCP.isArray({}), "array marker detection")
+equal(getmetatable(emptyArray), getmetatable(FastMCP.array()), "shared array metatable")
+equal(Dispatcher.jsonEncode({items=emptyArray}), '{"items":[]}', "nested empty array")
+equal(Dispatcher.jsonEncode(FastMCP.array{"one", "two"}), '["one","two"]', "nonempty array")
 equal(Dispatcher.jsonEncode({}), "{}", "empty object")
+equal(Dispatcher.jsonEncode({value=ba.json.null}), '{"value":null}', "JSON null")
 local cycle = {}; cycle.self = cycle
-local encodeOk, encoded, encodeErr = FastMCP.pcall(Dispatcher.jsonEncode, cycle)
-check(encodeOk and encoded == nil and encodeErr, "cycle returned nil and error without throwing")
-encoded, encodeErr = Dispatcher.jsonEncode(0/0)
-check(encoded == nil and encodeErr, "NaN returned nil and error")
-encoded, encodeErr = Dispatcher.jsonEncode({value=function() end})
-check(encoded == nil and encodeErr, "function returned nil and error")
-encoded, encodeErr = Dispatcher.jsonEncode({[2]="map"})
-check(encoded == nil and encodeErr, "numeric map key returned nil and error")
+equal(Dispatcher.jsonEncode(cycle), '{"self":null}', "recursive reference becomes null")
+equal(Dispatcher.jsonEncode({value=function() end}), '{"value":null}', "unsupported value becomes null")
+equal(Dispatcher.jsonEncode({[0]="map"}), '{"0":"map"}', "numeric object key")
+local encodeOk, encoded, encodeErr = FastMCP.pcall(Dispatcher.jsonEncode, {[true]="invalid"})
+check(encodeOk and encoded == nil and encodeErr, "unsupported object key returns error without throwing")
+local copiedArray = assert(Schema.validate({default=FastMCP.array()}, nil))
+equal(Dispatcher.jsonEncode(copiedArray), "[]", "schema default preserves array marker")
+local copiedObject = assert(Schema.validate({type="object"}, {items=FastMCP.array()}))
+equal(Dispatcher.jsonEncode(copiedObject), '{"items":[]}', "schema clone preserves nested array marker")
+local scalarResult = assert(Dispatcher.toMcpToolResult(FastMCP.toolResult{
+   content={{type="json", value=42}}
+}))
+equal(scalarResult.content[1].text, "42", "scalar JSON content uses native encoding")
+local emptyMcp = FastMCP.create {name="empty"}
+for _, method in ipairs{"tools/list", "resources/list", "resources/templates/list", "prompts/list"} do
+   local reply = Dispatcher.dispatch(emptyMcp, {jsonrpc="2.0", id=1, method=method})
+   check(Dispatcher.jsonEncode(reply):find(":[]", 1, true), method .. " preserves empty catalog")
+end
+local emptyResult = assert(Dispatcher.toMcpToolResult(nil))
+check(Dispatcher.jsonEncode(emptyResult):find('"content":[]', 1, true), "empty tool content array")
+local arrayResult = assert(Dispatcher.toMcpToolResult({items=FastMCP.array()}))
+equal(arrayResult.content[1].text, '{"items":[]}', "tool text preserves nested empty array")
+check(Dispatcher.jsonEncode(arrayResult):find('"items":[]', 1, true), "structured content preserves nested empty array")
 
-local cycleTool = {}; cycleTool.self = cycleTool
-mcp:tool("cycleResult", {}, function() return cycleTool end)
+mcp:tool("invalidKeyResult", {}, function() return {[true]="invalid"} end)
 local dispatchOk, dispatchResult = FastMCP.pcall(Dispatcher.dispatch, mcp, {
-   jsonrpc="2.0", id=77, method="tools/call", params={name="cycleResult", arguments={}}
+   jsonrpc="2.0", id=77, method="tools/call", params={name="invalidKeyResult", arguments={}}
 })
 check(dispatchOk and dispatchResult.error and dispatchResult.error.code == -32603,
-      "dispatcher converts serializer failure to JSON-RPC error")
+      "dispatcher converts native encoder failure to JSON-RPC error")
 
 -- Deterministic session capacity and expiration.
 local now, sid = 100, 0
@@ -211,7 +233,7 @@ equal(smallResponse.status, 500, "response bound enforced")
 mcp:tool("badSerialization", {}, function()
    return FastMCP.toolResult {
       content={"unserializable structured content"},
-      structuredContent={callback=function() end}
+      structuredContent={[true]="invalid object key"}
    }
 end)
 local badSerializationRequest = assert(Dispatcher.jsonEncode({

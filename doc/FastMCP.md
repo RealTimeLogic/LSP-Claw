@@ -272,23 +272,40 @@ and request/response bounds too. Prefer Streamable HTTP for MCP clients.
 
 ## Serialization Contract
 
-`fastmcp.dispatcher` preserves `FastMCP.array {}` as JSON arrays and ordinary
-empty tables as objects. It encodes `ba.json.null` as JSON null. Cycles,
-non-finite numbers, functions/userdata, and non-string object keys are
-programming errors and produce a bounded server error; they are never silently
-converted to null or invalid JSON. Binary resource content supplied as `blob`
-is base64 encoded; `blobBase64` is passed through.
+`Dispatcher.jsonEncode` is a direct alias for `ba.json.encode`. FastMCP requires
+a BAS runtime whose native encoder supports the metatable field
+`__jsontype = "array"`, including nested empty tables.
 
-`Dispatcher.jsonEncode(value)` follows the normal Lua error-return convention:
-it returns the encoded string on success, or `nil, error` when the value cannot
-be represented as JSON. It does not throw for a serialization failure. The
-dispatcher translates such failures into JSON-RPC error `-32603`, and the HTTP
-adapters return a bounded HTTP 500 error response.
+`FastMCP.array(value)` accepts an optional table (default: a new empty table),
+sets its metatable to a shared array metatable, and returns the same table.
+This replaces any existing metatable. `FastMCP.isArray(value)` returns a boolean
+indicating whether a table's metatable directly contains the exact string
+marker `__jsontype = "array"`. Array markers are not payload fields.
 
-BAS JSON encoding does not preserve marked empty arrays and converts some
-unsupported Lua values to null. FastMCP therefore retains its encoder to
-preserve this contract. Incoming MCP bodies are decoded directly with
-`ba.json.decode`.
+```lua
+-- Keep an empty result list as an array in the JSON response.
+local data = { items = FastMCP.array() }
+local json, err = Dispatcher.jsonEncode(data)
+assert(json, err)
+assert(json == '{"items":[]}')
+```
+
+Encoding follows the native contract: ordinary empty tables become `{}`;
+marked empty tables become `[]`. A table with nonzero raw length becomes an
+array of indexed values, ignoring other keys. Otherwise it becomes an object
+with string or numeric keys. Unsupported values and recursive references
+become JSON null; unsupported object-key types return an error. The marker
+does not change nonempty-table encoding. `ba.json.null` encodes as JSON null.
+
+`Dispatcher.jsonEncode(value)` requires a table and returns an encoded string
+on success, or `nil, error` on an encoding failure. A non-table argument is an
+API usage error and raises a Lua error. The dispatcher
+translates encoding failures into JSON-RPC error `-32603`, and the HTTP adapters
+return a bounded HTTP 500 error response when response encoding fails.
+
+Binary resource content supplied as `blob` is base64 encoded; `blobBase64` is
+passed through. Incoming MCP bodies use `ba.json.decode`, with an adapter check
+that rejects zero or multiple JSON documents in one HTTP request body.
 
 ## Tests
 

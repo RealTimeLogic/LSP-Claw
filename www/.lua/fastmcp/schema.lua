@@ -14,6 +14,10 @@ local function clone(value, seen)
    local out = {}
    for k, v in pairs(value) do out[clone(k, seen)] = clone(v, seen) end
    seen[value] = nil
+   local mt = getmetatable(value)
+   if type(mt) == "table" and rawget(mt, "__jsontype") == "array" then
+      setmetatable(out, mt)
+   end
    return out
 end
 

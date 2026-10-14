@@ -2,74 +2,7 @@ local FastMCP = require "fastmcp.engine"
 local pcall=FastMCP.pcall
 local Dispatcher = {}
 
-local function isInteger(value)
-   return type(value) == "number" and value >= 1 and value % 1 == 0
-end
-
-local function arrayInfo(value)
-   local max = 0
-   for k in pairs(value) do
-      if k ~= "fastmcpType" then
-	 if not isInteger(k) then return false, 0 end
-	 if k > max then max = k end
-      end
-   end
-   if FastMCP.isArray(value) then return true, max end
-   if max == 0 then return false, 0 end
-   for i = 1, max do
-      if rawget(value, i) == nil then return false, 0 end
-   end
-   return true, max
-end
-
-local function jsonEncodeValue(value, seen)
-   local valueType = type(value)
-   if value == nil or value == ba.json.null then return "null" end
-   if valueType == "string" then return ba.json.encodestr(value) end
-   if valueType == "number" then
-      if value ~= value or value == math.huge or value == -math.huge then return nil, "non-finite number cannot be encoded" end
-      return tostring(value)
-   end
-   if valueType == "boolean" then return value and "true" or "false" end
-   if valueType ~= "table" then return nil, "unsupported JSON value type: " .. valueType end
-
-   seen = seen or {}
-   if seen[value] then return nil, "cyclic table cannot be encoded" end
-   seen[value] = true
-
-   local isArray, max = arrayInfo(value)
-   local out = {}
-   if isArray then
-      for i = 1, max do
-         local encoded, err = jsonEncodeValue(rawget(value, i), seen)
-         if not encoded then seen[value] = nil; return nil, err end
-         out[#out + 1] = encoded
-      end
-      seen[value] = nil
-      return "[" .. table.concat(out, ",") .. "]"
-   end
-
-   local keys = {}
-   for k, v in pairs(value) do
-      if k ~= "fastmcpType" and v ~= nil then keys[#keys + 1] = k end
-   end
-   table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
-   for _, key in ipairs(keys) do
-      local keyType = type(key)
-      if keyType ~= "string" then seen[value] = nil; return nil, "JSON object keys must be strings" end
-      local encoded, err = jsonEncodeValue(value[key], seen)
-      if not encoded then seen[value] = nil; return nil, err end
-      out[#out + 1] = ba.json.encodestr(key) .. ":" .. encoded
-   end
-   seen[value] = nil
-   return "{" .. table.concat(out, ",") .. "}"
-end
-
-local function jsonEncode(value)
-   local ok, encoded, err = pcall(jsonEncodeValue, value)
-   if not ok then return nil, encoded end
-   return encoded, err
-end
+local jsonEncode = ba.json.encode
 
 local function jsonRpcError(id, code, message, data)
    local err = {
@@ -110,9 +43,10 @@ local function contentItem(item)
       return { type = "text", text = tostring(item) }
    end
    if item.type == "json" then
-      local encoded, err = jsonEncode(item.json or item.value or {})
+      -- Encode one array element so scalar JSON content also uses the native encoder.
+      local encoded, err = jsonEncode({item.json or item.value or {}})
       if not encoded then return nil, err end
-      return { type = "text", text = encoded }
+      return { type = "text", text = encoded:sub(2, -2) }
    end
    return stripMarker(item)
 end
